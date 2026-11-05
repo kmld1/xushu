@@ -13,7 +13,8 @@
 | 项目 Projects | `/projects` | 已实现 | 行式项目列表、当前标记、Git 状态、导入/归档/恢复 | PASS（Vitest） | PENDING |
 | 项目详情 Project Detail | `/projects/:id` | 已实现 | Git 状态、项目元数据、项目任务 | PASS（Vitest） | PENDING |
 | 任务 Tasks | `/tasks` | 已实现 | 项目/状态/搜索筛选、任务表格、新建任务 | PASS（Vitest） | PENDING |
-| 任务详情 Task Detail | `/tasks/:id` | 已实现 | StateTrack、验收条件、完成门禁、StateSpine 历史 | PASS（Vitest + 桌面 E2E） | PENDING |
+| 任务详情 Task Detail | `/tasks/:id` | 已实现 | StateTrack、验收条件、验证配置/运行、完成门禁、StateSpine 历史 | PASS（Vitest + 桌面 E2E） | PENDING |
+| 验收中心 Verification | `/verification` | 已实现 | 左侧待验收队列、右侧条件/命令/批准/运行/证据/历史/报告 | PASS（Vitest 空态 + 桌面 E2E） | PENDING |
 | 本地数据与健康 | `/diagnostics` | 已实现 | 系统健康 + Phase 1 探针 | PASS（Vitest） | PENDING |
 | 设置 Settings | `/settings` | 已实现 | 外观、关于、本地数据与隐私 | PASS（Vitest） | PENDING |
 | 404 | `*` | 已实现 | 统一空状态与返回路径 | PASS（构建） | PENDING |
@@ -39,6 +40,13 @@
 | ErrorState | `src/components/error-state.tsx` | 查询错误 | 已实现 |
 | StateTrack | `src/components/state-track.tsx` | 任务详情 | 已实现 |
 | StateSpine | `src/components/state-spine.tsx` | 任务历史 | 已实现 |
+| VerificationBadge | `src/components/status-badge.tsx` | 验收中心、任务详情、验证历史 | 已实现 |
+| CriterionVerification | `src/features/verification/criterion-verification.tsx` | 验收中心、任务详情 | 已实现 |
+| VerificationConfigDialog | `src/features/verification/verification-config-dialog.tsx` | 自动条件配置 | 已实现 |
+| VerificationApprovalDialog | `src/features/verification/verification-approval-dialog.tsx` | 命令预览、风险提示、批准 | 已实现 |
+| VerificationHistoryDialog | `src/features/verification/verification-history-dialog.tsx` | 运行历史 | 已实现 |
+| EvidenceDialog | `src/features/verification/evidence-dialog.tsx` | 证据详情、脱敏输出 | 已实现 |
+| AcceptanceReportDialog | `src/pages/verification-page.tsx` | 报告生成与复制 | 已实现 |
 
 ## 3. 状态表达检查
 
@@ -46,8 +54,12 @@
       均使用图标 + 中文 + 颜色，不只依赖颜色。
 - [x] 阻塞任务显示 `blockReason`（工作台与任务详情）。
 - [x] 完成门禁显示 required/satisfied 数量与具体 blockers。
-- [x] 预留 PASS / FAIL / NOT_RUN / INCONCLUSIVE / STALE 的 Token 与 `VerificationBadge`。
+- [x] PASS / FAIL / NOT_RUN / INCONCLUSIVE / STALE 已接入 `VerificationBadge`，均使用图标 + 中文 + 颜色。
+- [x] 自动条件显示当前有效状态、过期原因、命令、cwd、退出码、耗时与证据入口。
+- [x] 运行中的验证显示旋转图标、状态文字与取消按钮，不只靠颜色。
+- [x] 批准对话框展示程序、参数、cwd、超时、输出上限、成功规则与风险提示，并要求复选框确认。
 - [x] 不把 AI 声明或前端状态当作完成证据；完成由 Rust 门禁校验。
+- [x] 证据输出标注“模式化脱敏、非 100% 保证”，并展示内容摘要哈希。
 - [x] 任务详情展示 StateTrack 与 StateSpine，状态变化可追溯。
 
 ## 4. 可访问性检查（代码层面）
@@ -68,22 +80,33 @@
 |---|---|---|
 | `pnpm typecheck` | 0 | `tsc --noEmit` 通过 |
 | `pnpm lint` | 0 | ESLint 10，`--max-warnings 0` |
-| `pnpm test` | 0 | 7 个测试文件、39 个测试通过 |
-| `pnpm build` | 0 | Vite 构建通过；JS 719.50 kB / gzip 220.27 kB |
+| `pnpm test` | 0 | 7 个测试文件、40 个测试通过 |
+| `pnpm build` | 0 | Vite 构建通过；JS 757.52 kB / gzip 229.36 kB |
 | `pnpm format` | 0 | Prettier 检查通过 |
-| `cargo test --workspace` | 0 | 4 lib + 19 business + 12 persistence |
-| 桌面业务 E2E | 0 | 导入/建任务/验收/状态/确认/完成/重启读取全部通过 |
+| `cargo test --workspace` | 0 | 11 lib + 19 business + 12 persistence + 26 verification |
+| 桌面验证 E2E | 0 | 配置 → 批准 → 运行 → PASS → 完成 → 重启后仍为 done，证据可读 |
 
 ## 6. 桌面业务流程 E2E
 
-- 环境：Windows 11、WebView2 156.0.4314.58、1500×1000 窗口。
-- 流程：导入临时 Git 项目 → 创建任务 → 添加必需人工验收条件 → draft → ready →
-  running → awaiting_verification → 人工确认 → done → 完全关闭 → 重启 → 读回。
-- 结果：`statusDone=true`、`confirmed=true`、`completionSatisfied=true`；
-  任务标题与验收条件在重启后仍存在。
-- 证据：`C:\Users\kmld\AppData\Local\Temp\xushu-phase2-e2e\business-e2e-evidence.json`
-  （临时目录，未提交）。
-- 未截图/录屏。
+- 环境：Windows 11、WebView2 156.0.4314.58、1100×720 窗口。
+- 方法：通过 WebView2 CDP 驱动真实窗口与真实 Tauri IPC；临时脚本位于
+  `target/e2e/`（被 `.gitignore` 排除，未提交），未使用截图/录屏。
+- 第一轮（tag `20261106015932`）：导入临时 Git 项目 → 创建任务 → 添加必需自动条件 →
+  ready → running → awaiting_verification → 配置 `git --version` → 在批准对话框勾选确认 →
+  运行 → PASS → 标记完成 → 应用重建/重启 → 再次读取。
+  - 结果：`statusDone=true`、`verificationPass=true`、`completionSatisfied=true`；
+    证据摘要、哈希、修订号与指纹在重启后仍可读。
+  - 该轮在“证据摘要自然化”修复前执行，历史证据保留旧文案 `Some(0)`；未改写历史。
+- 第二轮（tag `20261106021137`，修复后二进制）：重复完整流程，证据摘要为
+  “验证程序退出码 0，耗时 66 ms”，且 `summary_has_debug_artifact=false`。
+- 第三轮（tag `20261106022214`，cwd 预检与进程清理加固后）：完整 smoke 通过，
+  证据摘要为“验证程序退出码 0，耗时 68 ms”。
+- 第四轮（tag `20261106023630`，最终复核）：完整 smoke 通过，证据摘要为
+  “验证程序退出码 0，耗时 45 ms”；真实 IPC 导出的报告包含命令、工作目录、
+  pass 与分享前检查提示。
+- 四轮测试项目均在结束后通过 IPC 软归档；任务/运行/检查/证据保留在本地数据库。
+- 结果文件：`target/e2e/e2e-result-full.json`、`target/e2e/e2e-result-verify.json`（未提交）。
+- 未截图/录屏；视觉验收仍待人工截图。
 
 ## 7. 人工视觉复核清单
 
@@ -97,26 +120,37 @@
 6. **任务详情（草稿）**：StateTrack、验收条件、完成门禁 blockers、状态操作。
 7. **任务详情（待验证）**：人工确认、确认记录、完成按钮禁用原因。
 8. **任务详情（已完成/阻塞/取消）**：状态视觉与操作可用性。
-9. **本地数据与健康**：健康数据、探针表格、WAL/外键/schema。
-10. **设置**：主题切换、关于、本地数据说明。
-11. **窗口缩放**：900px 与 1400px 宽度；检查侧栏、内容、表格、对话框、Toast。
+9. **验收中心（空队列）**：空状态与“查看任务”入口。
+10. **验收中心（有待验收任务）**：左侧队列、自动/人工计数、右侧条件面板。
+11. **验证配置 Dialog**：模板选择、程序、参数、cwd、超时、输出上限、风险提示。
+12. **批准 Dialog**：命令预览、解析路径、超时、输出上限、成功规则、复选框与禁用态。
+13. **运行中**：旋转图标、状态文字、取消按钮；取消后的结果。
+14. **证据 Dialog**：脱敏标记、内容摘要哈希、长输出滚动、深色主题。
+15. **验证历史**：运行状态、结果、退出码、耗时、证据入口。
+16. **过期证据**：STALE Badge、过期原因与重新运行入口。
+17. **报告 Dialog**：文件名、Markdown 预览、复制按钮。
+18. **本地数据与健康**：健康数据、探针表格、WAL/外键/schema。
+19. **设置**：主题切换、关于、本地数据说明。
+20. **窗口缩放**：900px 与 1400px 宽度；检查侧栏、内容、表格、对话框、Toast。
 
 建议同时检查：
 
 - 深色主题；
 - 错误/空状态；
 - 任务详情“待验证”且显示未通过原因；
-- 长项目路径、长任务标题不撑破布局。
+- 长项目路径、长任务标题、长命令与长输出不撑破布局。
 
 ## 8. 已知风险与待确认
 
 - 本阶段未自动截图；视觉一致性无法由自动化断言完全证明。
 - 中文字体使用 Windows 原生 Segoe UI Variable / Microsoft YaHei UI；非 Windows 环境可能回退。
-- 前端构建为单 chunk 719.50 kB（gzip 220.27 kB），Vite 提示 >500 kB；后续可路由级拆包。
+- 前端构建为单 chunk 757.52 kB（gzip 229.36 kB），Vite 提示 >500 kB；后续可路由级拆包。
 - 表格在极窄窗口下允许横向滚动；需人工确认没有页面级溢出。
-- 未来 Phase 3 的 PASS/FAIL/NOT_RUN/INCONCLUSIVE/STALE 仅预留 Token，尚无真实验证数据。
+- 自动验证首版拒绝 `.cmd/.bat/.ps1` 包装器；pnpm/npm 在 Windows 上的批处理 shim 不能直接作为验证程序，需配置底层 `.exe`。
+- 验证输出脱敏是模式化尽力而为，不能保证识别所有密钥格式；证据属于本地敏感数据。
+- 验收报告可能包含本地命令、工作目录与脱敏输出；UI 与报告文末均提示分享前检查。
 - 生产 CSP 尚未用打包产物实机验证。
-- 项目/任务归档为软归档；测试项目会保留在本地数据库，可手动归档/恢复。
+- 项目/任务归档为软归档；四轮 E2E 测试项目已归档，数据保留在本地数据库。
 
 ## 9. 签收
 

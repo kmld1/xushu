@@ -1,6 +1,9 @@
+use std::path::Path;
+
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use uuid::Uuid;
 
+use crate::code_state::{self, CodeState};
 use crate::db::{now_utc_rfc3339, Database};
 use crate::error::CoreError;
 use crate::models::{
@@ -16,6 +19,7 @@ use crate::validation::{
     optional_nonempty_text, optional_text, required_text, search_text, validate_revision,
     validate_uuid,
 };
+use crate::verification::{self, VerificationQueueItem, VerificationResult};
 
 const TASK_TITLE_MAX: usize = 200;
 const TASK_DESCRIPTION_MAX: usize = 10_000;
@@ -278,6 +282,45 @@ impl<'a> TaskRepository<'a> {
     pub(crate) fn required_criterion_count(&self, task_id: &str) -> Result<i64, CoreError> {
         let count = self.connection.query_row(
             "SELECT COUNT(*) FROM acceptance_criteria WHERE task_id = ?1 AND required = 1",
+            [task_id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    pub(crate) fn has_auto_criteria(&self, task_id: &str) -> Result<bool, CoreError> {
+        let count: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM acceptance_criteria WHERE task_id = ?1 AND kind = 'auto'",
+            [task_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    pub(crate) fn project_root(&self, project_id: &str) -> Result<String, CoreError> {
+        self.connection
+            .query_row(
+                "SELECT root_path FROM projects WHERE id = ?1",
+                [project_id],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
+    pub(crate) fn project_name(&self, project_id: &str) -> Result<String, CoreError> {
+        self.connection
+            .query_row(
+                "SELECT name FROM projects WHERE id = ?1",
+                [project_id],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
+    pub(crate) fn running_verification_count(&self, task_id: &str) -> Result<i64, CoreError> {
+        let count = self.connection.query_row(
+            "SELECT COUNT(*) FROM verification_runs
+             WHERE task_id = ?1 AND execution_status = 'running'",
             [task_id],
             |row| row.get(0),
         )?;
@@ -558,6 +601,24 @@ impl<'a> TaskService<'a> {
             ));
         }
 
+        // 完成门禁需要当前代码指纹。采集可能启动 Git 并读取变更文件，放到事务外，
+        // 避免长时间持有写锁；事务内仍会重新校验任务修订与状态。
+        let precomputed_code_state = if target == TaskStatus::Done {
+            let auto_root = {
+                let connection = self.database.lock()?;
+                let repository = TaskRepository::new(&connection);
+                let current = require_task(&repository, &task_id)?;
+                if repository.has_auto_criteria(&current.id)? {
+                    repository.project_root(&current.project_id).ok()
+                } else {
+                    None
+                }
+            };
+            auto_root.and_then(|root| code_state::capture(Path::new(&root)).ok())
+        } else {
+            None
+        };
+
         self.database.with_transaction(|transaction| {
             let repository = TaskRepository::new(transaction);
             let task = require_task(&repository, &task_id)?;
@@ -575,7 +636,8 @@ impl<'a> TaskService<'a> {
             }
 
             if target == TaskStatus::Done {
-                let (_, completion) = criteria_with_completion(transaction, &task)?;
+                let (_, completion) =
+                    criteria_with_completion(transaction, &task, precomputed_code_state.as_ref())?;
                 if !completion.can_complete {
                     return Err(CoreError::TaskNotCompletable(
                         completion.blockers.join("；"),
@@ -663,11 +725,29 @@ impl<'a> TaskService<'a> {
 
     pub fn get_task(&self, id: &str) -> Result<TaskDetail, CoreError> {
         let id = validate_uuid(id, "任务 ID")?;
+
+        // 代码指纹需要启动 Git 并读取变更文件，不能持有数据库锁执行；否则会与
+        // 后台验证的 finalize 写入相互等待。先短读决定是否需要采集，再在锁外采集。
+        let auto_context = {
+            let connection = self.database.lock()?;
+            let repository = TaskRepository::new(&connection);
+            let task = require_task(&repository, &id)?;
+            if repository.has_auto_criteria(&task.id)? {
+                Some(repository.project_root(&task.project_id).ok())
+            } else {
+                None
+            }
+        };
+        let current_code_state = auto_context
+            .flatten()
+            .and_then(|root| code_state::capture(Path::new(&root)).ok());
+
         let connection = self.database.lock()?;
         let repository = TaskRepository::new(&connection);
         let task = require_task(&repository, &id)?;
         let project_archived = repository.project_archived(&task.project_id)?;
-        let (criteria, completion) = criteria_with_completion(&connection, &task)?;
+        let (criteria, completion) =
+            criteria_with_completion(&connection, &task, current_code_state.as_ref())?;
         let transitions = repository.transitions_for_task(&task.id)?;
         let allowed_transitions = if task.archived_at.is_some() || project_archived {
             Vec::new()
@@ -876,6 +956,79 @@ impl<'a> TaskService<'a> {
         })
     }
 
+    pub fn verification_queue(&self) -> Result<Vec<VerificationQueueItem>, CoreError> {
+        let tasks = {
+            let connection = self.database.lock()?;
+            TaskRepository::new(&connection)
+                .active_tasks(Some(TaskStatus::AwaitingVerification), 50)?
+        };
+        let mut items = Vec::with_capacity(tasks.len());
+
+        for task in tasks {
+            // 与 get_task 相同：Git 指纹采集必须在数据库锁之外执行。
+            let (has_auto, project_root, project_name) = {
+                let connection = self.database.lock()?;
+                let repository = TaskRepository::new(&connection);
+                let criteria = repository.criteria_for_task(&task.id)?;
+                let has_auto = criteria
+                    .iter()
+                    .any(|criterion| criterion.kind == CriterionKind::Auto);
+                let project_root = if has_auto {
+                    repository.project_root(&task.project_id).ok()
+                } else {
+                    None
+                };
+                let project_name = repository.project_name(&task.project_id)?;
+                (has_auto, project_root, project_name)
+            };
+            let current_code_state = if has_auto {
+                project_root
+                    .as_deref()
+                    .and_then(|root| code_state::capture(Path::new(root)).ok())
+            } else {
+                None
+            };
+
+            let connection = self.database.lock()?;
+            let repository = TaskRepository::new(&connection);
+            // 指纹采集期间任务可能被修改；用当前任务重新评估，避免队列显示
+            // 基于旧修订的“门禁已满足”。
+            let fresh_task = require_task(&repository, &task.id)?;
+            let (views, completion) =
+                criteria_with_completion(&connection, &fresh_task, current_code_state.as_ref())?;
+            let auto_total = views
+                .iter()
+                .filter(|view| view.criterion.kind == CriterionKind::Auto)
+                .count() as i64;
+            let auto_satisfied = views
+                .iter()
+                .filter(|view| view.criterion.kind == CriterionKind::Auto && view.satisfied)
+                .count() as i64;
+            let manual_pending = views
+                .iter()
+                .filter(|view| {
+                    view.criterion.kind == CriterionKind::Manual
+                        && view.criterion.required
+                        && !view.satisfied
+                })
+                .count() as i64;
+            let running_count = repository.running_verification_count(&fresh_task.id)?;
+            drop(connection);
+
+            items.push(VerificationQueueItem {
+                task: fresh_task,
+                project_name,
+                completion,
+                auto_total,
+                auto_satisfied,
+                manual_pending,
+                running_count,
+            });
+        }
+
+        Ok(items)
+    }
+
     pub fn workspace_summary(&self) -> Result<WorkspaceSummary, CoreError> {
         let connection = self.database.lock()?;
         let project_repository = ProjectRepository::new(&connection);
@@ -945,6 +1098,7 @@ fn check_task_revision(task: &Task, expected: i64) -> Result<(), CoreError> {
 fn criteria_with_completion(
     connection: &Connection,
     task: &Task,
+    current_code_state: Option<&CodeState>,
 ) -> Result<(Vec<CriterionView>, CompletionStatus), CoreError> {
     let repository = TaskRepository::new(connection);
     let criteria = repository.criteria_for_task(&task.id)?;
@@ -954,22 +1108,34 @@ fn criteria_with_completion(
     let mut satisfied_required_count = 0_i64;
 
     for criterion in criteria {
-        let confirmation = if criterion.kind == CriterionKind::Manual {
-            repository.valid_confirmation(&criterion.id, criterion.revision, task.revision)?
-        } else {
-            None
+        let (confirmation, verification, satisfied) = match criterion.kind {
+            CriterionKind::Manual => {
+                let confirmation = repository.valid_confirmation(
+                    &criterion.id,
+                    criterion.revision,
+                    task.revision,
+                )?;
+                let satisfied = confirmation.is_some();
+                (confirmation, None, satisfied)
+            }
+            CriterionKind::Auto => {
+                let verification = verification::evaluate_criterion(
+                    connection,
+                    task,
+                    &criterion,
+                    current_code_state,
+                )?;
+                let satisfied = verification.status == VerificationResult::Pass;
+                (None, Some(verification), satisfied)
+            }
         };
-        let satisfied = confirmation.is_some();
 
         if criterion.required {
             required_count += 1;
             if satisfied {
                 satisfied_required_count += 1;
-            } else if criterion.kind == CriterionKind::Auto {
-                blockers.push(format!(
-                    "自动验收条件尚待 Phase 3 验证：{}",
-                    criterion.description
-                ));
+            } else if let Some(verification) = &verification {
+                blockers.push(verification::blocker_for(&criterion, verification));
             } else {
                 blockers.push(format!("人工验收条件尚未确认：{}", criterion.description));
             }
@@ -979,6 +1145,7 @@ fn criteria_with_completion(
             criterion,
             satisfied,
             confirmation,
+            verification,
         });
     }
 

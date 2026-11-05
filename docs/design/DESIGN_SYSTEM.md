@@ -1,6 +1,6 @@
 # XUSHU Design System
 
-> 版本：1.0（Phase 2，2026-11-06）
+> 版本：1.1（Phase 3，2026-11-06）
 > 适用范围：XUSHU 所有桌面端页面、组件与后续阶段。
 > 设计方法：先读本文件 → 使用 `frontend-design` Skill → 复用 Tokens/App Shell/组件 → 实现 → 质量检查 → 更新 `UI_AUDIT.md` → 人工视觉复核。
 
@@ -250,7 +250,7 @@ XUSHU 使用“冷石墨 + 氧化青 + 黄铜”的控制台色板。青色是�
 | blocked | 已阻塞 | `OctagonAlert` | `status-blocked` | 需要人工解除 |
 | cancelled | 已取消 | `Ban` | `status-cancelled` | 终止状态 |
 
-未来验证状态预留：
+验证状态（Phase 3 已接入）：
 
 | 状态 | 中文 | 图标 | Token |
 |---|---|---|---|
@@ -328,6 +328,20 @@ XUSHU 使用“冷石墨 + 氧化青 + 黄铜”的控制台色板。青色是�
 - 本地数据：数据库文件名、隐私边界、无云同步说明。
 - 不展示绝对路径、密钥或 token。
 
+### 7.8 验收中心 Verification Center
+
+- 页头：验收中心 / 待验证任务与真实证据 / 主操作“导出验收报告”（需选中任务）。
+- 布局：宽屏为 `340px` 待验收队列 + 右侧证据工作区；窄于 `xl` 时纵向堆叠。
+- 左栏：任务标题、项目名、自动条件通过数、人工待确认数、门禁状态、运行中图标；选中项使用 `accent` 与品牌边线，不只靠颜色。
+- 右栏：
+  - 任务摘要：状态、优先级、修订、更新时间、自动/人工/门禁三项计数、具体 blockers；
+  - 验收条件：自动条件显示 `VerificationBadge`、命令、cwd、当前判定、过期原因、配置/运行/取消/证据/历史操作；人工条件显示确认状态并链接到任务详情确认；
+  - 报告导出：写入应用数据目录 `exports/`，Dialog 展示文件名、Markdown 与复制按钮，不展示绝对路径。
+- 批准 Dialog：命令使用 `font-mono` 原样展示，列出 cwd、解析到的程序、超时、输出上限、成功规则与风险；必须勾选确认后才能启用“批准并运行”。
+- 运行状态：旋转图标 + “运行中”文字 + 取消按钮；结束后显示退出码、耗时、结果与证据入口。
+- 所有验证状态使用既有 `verification-*` Tokens；不得新增第二套状态颜色。
+- 空队列使用统一 `EmptyState`，引导去任务页配置自动条件；不展示假任务或假证据。
+
 ## 8. 可访问性与交互
 
 - 所有交互元素有可见 `focus-visible` ring（品牌色）。
@@ -350,6 +364,13 @@ XUSHU 使用“冷石墨 + 氧化青 + 黄铜”的控制台色板。青色是�
 - 每次 UI 任务先调用 `frontend-design` Skill；不得使用子 Agent。
 - 不自动截图/录屏；视觉检查由用户手动提供截图。未完成视觉检查时标记 `VISUAL_REVIEW_PENDING`。
 - 自动化类型/Lint/测试/构建通过不等于视觉验收通过。
+
+## 9.1 Phase 3 实现说明
+
+- 验收中心与任务详情复用 App Shell、PageHeader、Card、Badge、Dialog、Loading/Empty/Error 与 StatusBadge。
+- 验证状态使用 `VerificationBadge`；执行状态（运行中/已完成/取消/超时/启动失败/中断）使用图标 + 文字，结果仍由 `VerificationBadge` 表达。
+- 命令、cwd、哈希、退出码使用 `font-mono`；长文本 `break-all` 或 `truncate + title`，不撑破布局。
+- 未自动截图；视觉验收继续保持 `VISUAL_REVIEW_PENDING`。
 
 ## 10. 设计计划自检
 

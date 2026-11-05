@@ -11,6 +11,7 @@ import { ProjectsPage } from "@/pages/projects-page";
 import { SettingsPage } from "@/pages/settings-page";
 import { TaskDetailPage } from "@/pages/task-detail-page";
 import { TasksPage } from "@/pages/tasks-page";
+import { VerificationPage } from "@/pages/verification-page";
 
 function App() {
   return (
@@ -24,6 +25,7 @@ function App() {
               <Route path="projects/:projectId" element={<ProjectDetailPage />} />
               <Route path="tasks" element={<TasksPage />} />
               <Route path="tasks/:taskId" element={<TaskDetailPage />} />
+              <Route path="verification" element={<VerificationPage />} />
               <Route path="diagnostics" element={<DiagnosticsPage />} />
               <Route path="persistence" element={<Navigate to="/diagnostics" replace />} />
               <Route path="settings" element={<SettingsPage />} />

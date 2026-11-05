@@ -5,6 +5,7 @@ use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, 
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreError;
+use crate::verification::CriterionVerification;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -272,6 +273,7 @@ pub struct CriterionView {
     pub criterion: AcceptanceCriterion,
     pub satisfied: bool,
     pub confirmation: Option<ManualConfirmation>,
+    pub verification: Option<CriterionVerification>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { EmptyState } from "@/components/empty-state";
+import { CriterionVerification } from "@/features/verification/criterion-verification";
 import { ConfirmManualDialog } from "@/features/tasks/confirm-manual-dialog";
 import { CriterionDialog } from "@/features/tasks/criterion-dialog";
 import { useRemoveCriterion } from "@/features/tasks/queries";
@@ -46,7 +47,7 @@ export function CriterionList({ detail, readOnly }: { detail: TaskDetail; readOn
         <div>
           <h2 className="text-base font-semibold">验收条件</h2>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            必需条件全部满足后，任务才允许完成。自动验收在 Phase 2 不会产生 PASS 证据。
+            必需条件全部满足后，任务才允许完成。自动条件只接受当前有效的真实验证 PASS 证据。
           </p>
         </div>
         <Button
@@ -113,11 +114,15 @@ export function CriterionList({ detail, readOnly }: { detail: TaskDetail; readOn
                           {view.confirmation.note ? ` · ${view.confirmation.note}` : ""}
                         </p>
                       ) : criterion.kind === "auto" ? (
-                        <p>等待 Phase 3 自动验证；当前不产生通过证据。</p>
+                        <p>自动验收由你在批准后运行的真实验证命令判定。</p>
                       ) : (
                         <p>{canConfirm ? "等待你人工确认。" : "处于待验证状态时才能人工确认。"}</p>
                       )}
                     </div>
+
+                    {criterion.kind === "auto" ? (
+                      <CriterionVerification task={task} view={view} readOnly={readOnly} />
+                    ) : null}
 
                     <div className="mt-3 flex flex-wrap gap-2">
                       {manual && !view.satisfied && canConfirm ? (

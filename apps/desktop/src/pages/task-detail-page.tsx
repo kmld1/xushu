@@ -40,7 +40,7 @@ function NextStep({
           : status === "awaiting_verification"
             ? canComplete
               ? "必需验收条件已满足，可以标记完成。"
-              : "先处理未通过的验收条件；必需自动条件需要等待 Phase 3。"
+              : "先处理未通过的验收条件；必需自动条件需要先配置并运行验证，取得当前有效的 PASS 证据。"
             : status === "blocked"
               ? blockReason
                 ? `解除阻塞：${blockReason}`

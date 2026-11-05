@@ -6,10 +6,21 @@ rust-version.workspace = true
 
 [dependencies]
 chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
+regex = "=1.13.1"
 rusqlite = { version = "=0.41.1", features = ["bundled"] }
 serde.workspace = true
+serde_json = "=1.0.154"
+sha2 = "=0.10.9"
 thiserror = "=2.0.21"
 uuid = { version = "=1.29.0", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 tempfile = "=3.27.0"

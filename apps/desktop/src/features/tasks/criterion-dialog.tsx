@@ -29,7 +29,7 @@ import { getErrorMessage } from "@/lib/ipc";
 
 const KIND_LABELS: Record<(typeof CRITERION_KINDS)[number], string> = {
   manual: "人工确认",
-  auto: "自动验证（Phase 3）",
+  auto: "自动验证（真实命令）",
 };
 
 export function CriterionDialog({
@@ -157,9 +157,10 @@ export function CriterionDialog({
           {kind === "auto" ? (
             <Alert variant="warning">
               <ListChecks className="mt-0.5 size-4" aria-hidden="true" />
-              <AlertTitle>Phase 2 尚无自动验证引擎</AlertTitle>
+              <AlertTitle>自动条件需要真实命令证据</AlertTitle>
               <AlertDescription>
-                必需自动条件不会产生 PASS 证据，因此会阻止任务完成。Phase 3 接入验证运行器后再使用。
+                创建后需要配置验证命令，并在“待验证”状态由你批准运行；只有当前有效的 PASS
+                证据才会满足该条件。
               </AlertDescription>
             </Alert>
           ) : null}

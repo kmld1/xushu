@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use crate::error::CoreError;
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
+const GIT_OUTPUT_LIMIT: usize = 1024 * 1024;
 
 /// 只读 Git 状态。不包含文件列表或源码内容。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,10 +20,11 @@ pub struct GitStatus {
     pub unborn: bool,
 }
 
-struct GitOutput {
-    success: bool,
-    stdout: String,
-    stderr: String,
+pub(crate) struct GitRawOutput {
+    pub success: bool,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub stdout_truncated: bool,
 }
 
 /// 以可执行文件 + 参数数组调用本机 `git`，不经过 shell。
@@ -94,7 +96,28 @@ pub fn inspect(path: &Path) -> Result<GitStatus, CoreError> {
     })
 }
 
+struct GitOutput {
+    success: bool,
+    stdout: String,
+    stderr: String,
+}
+
 fn run_git(path: &Path, args: &[&str]) -> Result<GitOutput, CoreError> {
+    let output = run_git_raw(path, args, GIT_TIMEOUT, GIT_OUTPUT_LIMIT)?;
+    Ok(GitOutput {
+        success: output.success,
+        stdout: String::from_utf8_lossy(&output.stdout).trim().to_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+    })
+}
+
+/// 运行只读 Git 命令；输出超过 `max_bytes` 时继续排空管道但只保留前缀。
+pub(crate) fn run_git_raw(
+    path: &Path,
+    args: &[&str],
+    timeout: Duration,
+    max_bytes: usize,
+) -> Result<GitRawOutput, CoreError> {
     let mut child = Command::new("git")
         .arg("-C")
         .arg(path)
@@ -105,27 +128,19 @@ fn run_git(path: &Path, args: &[&str]) -> Result<GitOutput, CoreError> {
         .spawn()
         .map_err(|error| CoreError::Git(format!("无法启动 git: {error}")))?;
 
-    let mut stdout_pipe = child
+    let stdout_pipe = child
         .stdout
         .take()
         .ok_or_else(|| CoreError::Git("无法读取 git stdout".to_owned()))?;
-    let mut stderr_pipe = child
+    let stderr_pipe = child
         .stderr
         .take()
         .ok_or_else(|| CoreError::Git("无法读取 git stderr".to_owned()))?;
 
-    let stdout_handle = thread::spawn(move || {
-        let mut buffer = Vec::new();
-        let _ = stdout_pipe.read_to_end(&mut buffer);
-        buffer
-    });
-    let stderr_handle = thread::spawn(move || {
-        let mut buffer = Vec::new();
-        let _ = stderr_pipe.read_to_end(&mut buffer);
-        buffer
-    });
+    let stdout_handle = thread::spawn(move || read_limited(stdout_pipe, max_bytes));
+    let stderr_handle = thread::spawn(move || read_limited(stderr_pipe, max_bytes));
 
-    let deadline = Instant::now() + GIT_TIMEOUT;
+    let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -147,14 +162,39 @@ fn run_git(path: &Path, args: &[&str]) -> Result<GitOutput, CoreError> {
         }
     };
 
-    let stdout = stdout_handle.join().unwrap_or_default();
-    let stderr = stderr_handle.join().unwrap_or_default();
+    let (stdout, _stdout_bytes, stdout_truncated) = stdout_handle.join().unwrap_or_default();
+    let (stderr, _stderr_bytes, _stderr_truncated) = stderr_handle.join().unwrap_or_default();
 
-    Ok(GitOutput {
+    Ok(GitRawOutput {
         success: status.success(),
-        stdout: String::from_utf8_lossy(&stdout).trim().to_owned(),
-        stderr: String::from_utf8_lossy(&stderr).trim().to_owned(),
+        stdout,
+        stderr,
+        stdout_truncated,
     })
+}
+
+fn read_limited(mut pipe: impl Read, max_bytes: usize) -> (Vec<u8>, u64, bool) {
+    let mut kept = Vec::new();
+    let mut total = 0_u64;
+    let mut buffer = [0_u8; 16 * 1024];
+
+    loop {
+        match pipe.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => {
+                total += read as u64;
+                if kept.len() < max_bytes {
+                    let remaining = max_bytes - kept.len();
+                    let take = remaining.min(read);
+                    kept.extend_from_slice(&buffer[..take]);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    let truncated = total > max_bytes as u64;
+    (kept, total, truncated)
 }
 
 fn normalize_display_path(path: PathBuf) -> PathBuf {

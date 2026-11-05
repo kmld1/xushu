@@ -42,6 +42,18 @@ pub fn run() {
             business_commands::update_acceptance_criterion,
             business_commands::remove_acceptance_criterion,
             business_commands::confirm_manual_criterion,
+            business_commands::save_verification_spec,
+            business_commands::get_verification_spec,
+            business_commands::list_verification_templates,
+            business_commands::preview_verification,
+            business_commands::start_verification,
+            business_commands::cancel_verification,
+            business_commands::get_verification_run,
+            business_commands::list_verification_runs,
+            business_commands::get_verification_check,
+            business_commands::get_evidence,
+            business_commands::list_verification_queue,
+            business_commands::export_acceptance_report,
         ])
         .run(tauri::generate_context!())
         .expect("运行序枢 XUSHU 桌面程序失败");

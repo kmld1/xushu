@@ -28,7 +28,7 @@ fn opens_database_with_safe_pragmas_and_migrations() {
     assert!(health.foreign_keys_enabled);
     assert!(!health.foreign_key_violations);
     assert_eq!(health.journal_mode.to_ascii_lowercase(), "wal");
-    assert_eq!(health.schema_version, 2);
+    assert_eq!(health.schema_version, 3);
     assert_eq!(health.record_count, 0);
     assert_eq!(health.database_file, "xushu.db");
 }
@@ -39,8 +39,8 @@ fn migrations_are_idempotent() {
     let report = database.migrate().expect("repeat migrations");
 
     assert_eq!(report.applied, Vec::<i64>::new());
-    assert_eq!(report.current_version, 2);
-    assert_eq!(database.health().expect("health").schema_version, 2);
+    assert_eq!(report.current_version, 3);
+    assert_eq!(database.health().expect("health").schema_version, 3);
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn newer_schema_is_rejected_instead_of_downgraded() {
         error,
         CoreError::SchemaTooNew {
             found: 5,
-            supported: 2
+            supported: 3
         }
     ));
 }
@@ -281,5 +281,5 @@ fn database_creates_nested_parent_directories() {
     let database = Database::open(&database_path).expect("open nested database");
 
     assert!(database_path.exists());
-    assert_eq!(database.health().expect("health").schema_version, 2);
+    assert_eq!(database.health().expect("health").schema_version, 3);
 }

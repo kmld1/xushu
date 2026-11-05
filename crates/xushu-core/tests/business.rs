@@ -463,7 +463,10 @@ fn auto_required_criterion_blocks_done_and_is_never_faked_as_pass() {
     let blocked = transition(&database, &task.id, "done", None).expect_err("auto gate");
     match blocked {
         CoreError::TaskNotCompletable(message) => {
-            assert!(message.contains("Phase 3"), "unexpected message: {message}");
+            assert!(
+                message.contains("尚未配置验证"),
+                "unexpected message: {message}"
+            );
         }
         other => panic!("unexpected error: {other:?}"),
     }

@@ -1,4 +1,11 @@
-import { Database, FolderGit2, LayoutDashboard, ListChecks, Settings } from "lucide-react";
+import {
+  Database,
+  FolderGit2,
+  LayoutDashboard,
+  ListChecks,
+  Settings,
+  ShieldCheck,
+} from "lucide-react";
 import { Link, NavLink, Outlet } from "react-router";
 
 import { ThemeControl } from "@/components/theme-control";
@@ -21,6 +28,7 @@ const navigation = [
   { to: "/", label: "工作台", icon: LayoutDashboard, end: true },
   { to: "/projects", label: "项目", icon: FolderGit2, end: false },
   { to: "/tasks", label: "任务", icon: ListChecks, end: false },
+  { to: "/verification", label: "验收中心", icon: ShieldCheck, end: false },
   { to: "/diagnostics", label: "诊断", icon: Database, end: false },
   { to: "/settings", label: "设置", icon: Settings, end: false },
 ];
@@ -53,7 +61,7 @@ export function AppLayout() {
           </div>
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold leading-none">序枢 XUSHU</p>
-            <p className="mt-1 truncate text-[11px] text-muted-foreground">Phase 2 · 项目与任务</p>
+            <p className="mt-1 truncate text-[11px] text-muted-foreground">Phase 3 · 独立验收</p>
           </div>
         </div>
 

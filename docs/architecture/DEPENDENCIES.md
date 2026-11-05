@@ -1,6 +1,6 @@
 # 依赖与工具链基线
 
-> 状态：**Phase 2 PASS**（2026-11-06）。
+> 状态：**Phase 3 PASS**（2026-11-06）。
 >
 > 本文件只记录实际安装、实际锁定并通过检查的版本。依赖升级必须重新生成
 > `pnpm-lock.yaml` / `Cargo.lock`，并复跑文末质量门禁。
@@ -97,6 +97,10 @@
 | `uuid` | 1.29.0 | v4 记录 ID |
 | `chrono` | 0.4.45 | UTC RFC3339 时间 |
 | `thiserror` | 2.0.21 | 核心错误类型（传递依赖另有 1.0.69） |
+| `regex` | 1.13.1 | 验证输出模式化脱敏 |
+| `serde_json` | 1.0.154 | 验证参数数组与证据元数据 |
+| `sha2` | 0.10.9 | 工作区内容指纹与证据摘要哈希 |
+| `windows-sys` | 0.61.2 | Windows Job Object 进程树清理（仅 Windows target） |
 | `tempfile` | 3.27.0 | 仅 dev/test 临时数据库 |
 
 - Rust edition：2021；workspace `rust-version = "1.90"`。
@@ -117,6 +121,9 @@
 10. `@tauri-apps/cli 2.12.4` 与 `tauri 2.12.5` 已在本机实际编译并启动。
 11. **Radix UI 1.x/2.x 与 sonner 2.0.8** 均声明支持 React 19；实际 typecheck、Lint、Vitest 与桌面启动通过。
 12. Phase 2 未新增 Rust crate；状态机、项目/任务服务、Git 只读检查使用现有 `rusqlite` / `serde` / `uuid` / `chrono` / `thiserror`。
+13. Phase 3 新增 `regex 1.13.1`、`serde_json 1.0.154`、`sha2 0.10.9` 为直接依赖；三者此前已在 `Cargo.lock` 中作为传递依赖存在，版本未变。
+14. `windows-sys 0.61.2` 仅用于 Windows Job Object，启用 `Win32_Foundation`、`Win32_Security`、`Win32_System_JobObjects`、`Win32_System_Threading`；非 Windows 不编译该依赖。
+15. 验证运行器使用 `std::process::Command` 与参数数组，不引入 Shell 插件或命令执行框架。
 
 ## 5. 锁文件与复现策略
 
@@ -136,9 +143,11 @@
 - 数据库：Tauri `app_data_dir()` 下的 `xushu.db`；Windows 实测
   `%APPDATA%\dev.xushu.desktop\xushu.db`，不进入仓库。
 - PRAGMA：`foreign_keys=ON`、`journal_mode=WAL`、`synchronous=NORMAL`、`busy_timeout=5000`。
-- Schema（迁移版本 2）：`schema_migrations`、`persistence_probes`、`projects`、`tasks`、
-  `acceptance_criteria`、`task_transitions`、`manual_confirmations`。
+- Schema（迁移版本 3）：`schema_migrations`、`persistence_probes`、`projects`、`tasks`、
+  `acceptance_criteria`、`task_transitions`、`manual_confirmations`、`verification_specs`、
+  `verification_runs`、`verification_checks`、`evidence`。
 - Phase 2 业务表使用 UUID、UTC RFC3339、外键、CHECK 约束、唯一根路径 key 与人工确认修订唯一索引。
+- Phase 3 验证表保留运行快照、修订号、Git/工作区指纹、脱敏输出与证据哈希；检查与证据按 run 唯一。
 - Capabilities：仅 `core:default`；无 Shell / FS / SQL 插件权限。
 - CSP：
   - 生产：`default-src 'self'; connect-src ipc: http://ipc.localhost; ...; script-src 'self'; object-src 'none'; base-uri 'self'`
@@ -152,20 +161,19 @@
 | `pnpm install --frozen-lockfile` | 0 | 锁文件一致 |
 | `pnpm typecheck` | 0 | `tsc --noEmit` 通过 |
 | `pnpm lint` | 0 | ESLint 10，`--max-warnings 0` |
-| `pnpm test` | 0 | 7 个测试文件、39 个测试通过 |
-| `pnpm build` | 0 | Vite 生产构建通过；JS 719.50 kB / gzip 220.27 kB（有 >500 kB chunk 提示） |
+| `pnpm test` | 0 | 7 个测试文件、40 个测试通过 |
+| `pnpm build` | 0 | Vite 生产构建通过；JS 757.52 kB / gzip 229.36 kB（有 >500 kB chunk 提示） |
 | `pnpm format` | 0 | Prettier 检查通过 |
 | `cargo check --workspace --all-targets --locked` | 0 | Rust workspace 通过 |
 | `cargo fmt --all -- --check` | 0 | rustfmt 通过 |
 | `cargo clippy --workspace --all-targets -- -D warnings` | 0 | Clippy 通过 |
-| `cargo test --workspace` | 0 | 4 个 lib 测试 + 19 个业务集成测试 + 12 个持久化测试通过 |
+| `cargo test --workspace` | 0 | 11 个 lib 测试 + 19 个业务 + 12 个持久化 + 26 个验证测试通过 |
 | `pnpm tauri info` | 0 | 环境与依赖版本被正确识别 |
 
 ## 8. 已规划但本阶段未安装
 
 - `xushu-hook` CLI（Phase 4）
 - Claude Code Hooks 相关依赖（Phase 4）
-- 自动验收命令运行器、证据存储与过期判定（Phase 3）
 - 备份/恢复、日志脱敏与安全加固依赖（Phase 6）
 - 安装包、签名与分发工具（Phase 7）
 

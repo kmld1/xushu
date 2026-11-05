@@ -24,6 +24,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0002_projects_tasks",
         sql: include_str!("../../migrations/0002_projects_tasks.sql"),
     },
+    Migration {
+        version: 3,
+        name: "0003_verification_engine",
+        sql: include_str!("../../migrations/0003_verification_engine.sql"),
+    },
 ];
 
 /// 一次迁移执行的结果。

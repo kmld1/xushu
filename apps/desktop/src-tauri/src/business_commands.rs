@@ -1,10 +1,12 @@
 use tauri::State;
 use xushu_core::{
-    AcceptanceCriterion, ArchiveTaskInput, ConfirmManualInput, CreateCriterionInput,
-    CreateTaskInput, ImportProjectInput, ManualConfirmation, Project, ProjectGitStatus,
-    ProjectService, ReopenTaskInput, Task, TaskDetail, TaskFilter, TaskService,
-    TransitionTaskInput, UpdateCriterionInput, UpdateProjectInput, UpdateTaskInput,
-    WorkspaceSummary,
+    AcceptanceCriterion, AcceptanceReport, ArchiveTaskInput, ConfirmManualInput,
+    CreateCriterionInput, CreateTaskInput, Evidence, ImportProjectInput, ManualConfirmation,
+    Project, ProjectGitStatus, ProjectService, ReopenTaskInput, SaveVerificationSpecInput,
+    StartVerificationInput, Task, TaskDetail, TaskFilter, TaskService, TransitionTaskInput,
+    UpdateCriterionInput, UpdateProjectInput, UpdateTaskInput, VerificationCheck,
+    VerificationPreview, VerificationQueueItem, VerificationRun, VerificationRunSummary,
+    VerificationService, VerificationSpec, VerificationTemplate, WorkspaceSummary,
 };
 
 use crate::error::ApiError;
@@ -145,4 +147,92 @@ pub fn confirm_manual_criterion(
     input: ConfirmManualInput,
 ) -> Result<ManualConfirmation, ApiError> {
     state.with_database(|database| TaskService::new(database).confirm_manual_criterion(input))
+}
+
+#[tauri::command]
+pub fn save_verification_spec(
+    state: State<'_, AppState>,
+    input: SaveVerificationSpecInput,
+) -> Result<VerificationSpec, ApiError> {
+    state.with_database(|database| VerificationService::new(database).save_spec(input))
+}
+
+#[tauri::command]
+pub fn get_verification_spec(
+    state: State<'_, AppState>,
+    criterion_id: String,
+) -> Result<Option<VerificationSpec>, ApiError> {
+    state.with_database(|database| VerificationService::new(database).get_spec(&criterion_id))
+}
+
+#[tauri::command]
+pub fn list_verification_templates(
+    state: State<'_, AppState>,
+) -> Result<Vec<VerificationTemplate>, ApiError> {
+    state.with_database(|database| Ok(VerificationService::new(database).templates()))
+}
+
+#[tauri::command]
+pub fn preview_verification(
+    state: State<'_, AppState>,
+    criterion_id: String,
+) -> Result<VerificationPreview, ApiError> {
+    state.with_database(|database| VerificationService::new(database).preview(&criterion_id))
+}
+
+#[tauri::command]
+pub fn start_verification(
+    state: State<'_, AppState>,
+    input: StartVerificationInput,
+) -> Result<VerificationRun, ApiError> {
+    state.inner().clone().start_verification(input)
+}
+
+#[tauri::command]
+pub fn cancel_verification(state: State<'_, AppState>, run_id: String) -> Result<(), ApiError> {
+    state.cancel_verification(&run_id)
+}
+
+#[tauri::command]
+pub fn get_verification_run(
+    state: State<'_, AppState>,
+    run_id: String,
+) -> Result<VerificationRun, ApiError> {
+    state.with_database(|database| VerificationService::new(database).get_run(&run_id))
+}
+
+#[tauri::command]
+pub fn list_verification_runs(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<Vec<VerificationRunSummary>, ApiError> {
+    state.with_database(|database| VerificationService::new(database).list_runs(&task_id))
+}
+
+#[tauri::command]
+pub fn get_verification_check(
+    state: State<'_, AppState>,
+    run_id: String,
+) -> Result<Option<VerificationCheck>, ApiError> {
+    state.with_database(|database| VerificationService::new(database).get_check(&run_id))
+}
+
+#[tauri::command]
+pub fn get_evidence(state: State<'_, AppState>, evidence_id: String) -> Result<Evidence, ApiError> {
+    state.with_database(|database| VerificationService::new(database).get_evidence(&evidence_id))
+}
+
+#[tauri::command]
+pub fn list_verification_queue(
+    state: State<'_, AppState>,
+) -> Result<Vec<VerificationQueueItem>, ApiError> {
+    state.with_database(|database| TaskService::new(database).verification_queue())
+}
+
+#[tauri::command]
+pub fn export_acceptance_report(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<AcceptanceReport, ApiError> {
+    state.export_acceptance_report(&task_id)
 }

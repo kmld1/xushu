@@ -26,7 +26,7 @@ const appInfo = {
   name: "序枢 XUSHU",
   version: "0.1.0",
   tauriVersion: "2.12.5",
-  phase: "Phase 2",
+  phase: "Phase 3",
   platform: "windows",
 };
 
@@ -36,7 +36,7 @@ const health = {
   foreignKeysEnabled: true,
   foreignKeyViolations: false,
   journalMode: "wal",
-  schemaVersion: 2,
+  schemaVersion: 3,
   recordCount: 0,
   databaseFile: "xushu.db",
 };
@@ -88,7 +88,7 @@ const criterion: AcceptanceCriterion = {
 
 const taskDetail: TaskDetail = {
   task,
-  criteria: [{ criterion, satisfied: false, confirmation: null }],
+  criteria: [{ criterion, satisfied: false, confirmation: null, verification: null }],
   transitions: [
     {
       id: "44444444-4444-4444-8444-444444444444",
@@ -177,6 +177,10 @@ function mockBackend({
         return taskDetail;
       case "list_probe_records":
         return [];
+      case "list_verification_queue":
+        return [];
+      case "list_verification_runs":
+        return [];
       case "get_probe_record":
         throw { code: "NOT_FOUND", message: "未找到指定记录" };
       case "create_probe_record":
@@ -202,7 +206,7 @@ describe("XUSHU desktop shell", () => {
 
     expect(await screen.findByText("还没有可管理的项目")).toBeInTheDocument();
     expect(await screen.findByText("系统健康")).toBeInTheDocument();
-    expect(await screen.findByText("v2")).toBeInTheDocument();
+    expect(await screen.findByText("v3")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "项目" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "任务" })).toBeInTheDocument();
   });
@@ -272,6 +276,15 @@ describe("XUSHU desktop shell", () => {
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
     expect(await screen.findByText("外观")).toBeInTheDocument();
     expect(await screen.findByText("本地数据与隐私")).toBeInTheDocument();
+  });
+
+  it("navigates to the verification center and shows an honest empty queue", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("link", { name: "验收中心" }));
+    expect(await screen.findByRole("heading", { name: "验收中心" })).toBeInTheDocument();
+    expect(await screen.findByText("当前没有待验收任务")).toBeInTheDocument();
   });
 
   it("navigates to diagnostics and keeps the Phase 1 probe surface", async () => {

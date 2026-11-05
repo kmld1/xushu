@@ -69,10 +69,200 @@ export type ManualConfirmation = {
   note: string | null;
 };
 
+export type VerificationStatus = "pass" | "fail" | "not_run" | "inconclusive" | "stale";
+
+export type VerificationExecutionStatus =
+  "running" | "completed" | "cancelled" | "timed_out" | "start_failed" | "interrupted";
+
+export type CodeState = {
+  head: string | null;
+  branch: string | null;
+  detached: boolean;
+  unborn: boolean;
+  dirty: boolean;
+  fingerprint: string | null;
+  fingerprintComplete: boolean;
+  changedFileCount: number;
+  note: string | null;
+};
+
+export type VerificationSpec = {
+  id: string;
+  criterionId: string;
+  executable: string;
+  args: string[];
+  cwd: string;
+  timeoutSeconds: number;
+  outputLimitBytes: number;
+  successRule: string;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type VerificationCheck = {
+  id: string;
+  runId: string;
+  taskId: string;
+  criterionId: string | null;
+  result: VerificationStatus;
+  reason: string;
+  evidenceId: string | null;
+  createdAt: string;
+};
+
+export type VerificationRunSummary = {
+  id: string;
+  taskId: string;
+  criterionId: string | null;
+  criterionDescription: string;
+  executable: string;
+  args: string[];
+  cwd: string;
+  executionStatus: VerificationExecutionStatus;
+  result: VerificationStatus | null;
+  reason: string | null;
+  evidenceId: string | null;
+  specRevision: number;
+  taskRevision: number;
+  criterionRevision: number;
+  startedAt: string;
+  finishedAt: string | null;
+  exitCode: number | null;
+  durationMs: number | null;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+  sensitiveFlags: string[];
+  createdAt: string;
+};
+
+export type VerificationRun = {
+  id: string;
+  taskId: string;
+  criterionId: string | null;
+  criterionDescription: string;
+  specId: string | null;
+  specRevision: number;
+  taskRevision: number;
+  criterionRevision: number;
+  executable: string;
+  resolvedExecutable: string | null;
+  args: string[];
+  cwd: string;
+  timeoutSeconds: number;
+  outputLimitBytes: number;
+  successRule: string;
+  approvedAt: string;
+  startedAt: string;
+  finishedAt: string | null;
+  executionStatus: VerificationExecutionStatus;
+  exitCode: number | null;
+  durationMs: number | null;
+  startCodeState: CodeState | null;
+  endCodeState: CodeState | null;
+  stdoutSummary: string | null;
+  stderrSummary: string | null;
+  stdoutBytes: number | null;
+  stderrBytes: number | null;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+  sensitiveFlags: string[];
+  outputDigest: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  cancelReason: string | null;
+  createdAt: string;
+};
+
+export type CriterionVerification = {
+  status: VerificationStatus;
+  spec: VerificationSpec | null;
+  latestRun: VerificationRunSummary | null;
+  latestCheck: VerificationCheck | null;
+  validPassRunId: string | null;
+  staleReason: string | null;
+  detail: string | null;
+};
+
+export type VerificationPreview = {
+  criterionId: string;
+  criterionDescription: string;
+  taskId: string;
+  taskTitle: string;
+  executable: string;
+  resolvedExecutable: string | null;
+  args: string[];
+  cwd: string;
+  timeoutSeconds: number;
+  outputLimitBytes: number;
+  successRule: string;
+  specRevision: number;
+  taskRevision: number;
+  criterionRevision: number;
+  warnings: string[];
+};
+
+export type VerificationTemplate = {
+  id: string;
+  name: string;
+  description: string;
+  executable: string;
+  args: string[];
+  timeoutSeconds: number;
+};
+
+export type Evidence = {
+  id: string;
+  sourceType: string;
+  taskId: string;
+  runId: string | null;
+  summary: string;
+  redactedOutput: string | null;
+  contentDigest: string;
+  sensitiveFlags: string[];
+  createdAt: string;
+};
+
+export type VerificationQueueItem = {
+  task: Task;
+  projectName: string;
+  completion: CompletionStatus;
+  autoTotal: number;
+  autoSatisfied: number;
+  manualPending: number;
+  runningCount: number;
+};
+
+export type SaveVerificationSpecInput = {
+  criterionId: string;
+  expectedTaskRevision: number;
+  expectedCriterionRevision: number;
+  expectedSpecRevision: number | null;
+  executable: string;
+  args: string[];
+  cwd?: string | null;
+  timeoutSeconds: number;
+  outputLimitBytes: number;
+};
+
+export type StartVerificationInput = {
+  criterionId: string;
+  expectedTaskRevision: number;
+  expectedCriterionRevision: number;
+  expectedSpecRevision: number;
+  approved: boolean;
+};
+
+export type AcceptanceReport = {
+  fileName: string;
+  markdown: string;
+};
+
 export type CriterionView = {
   criterion: AcceptanceCriterion;
   satisfied: boolean;
   confirmation: ManualConfirmation | null;
+  verification: CriterionVerification | null;
 };
 
 export type CompletionStatus = {
