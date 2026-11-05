@@ -1,0 +1,5 @@
+packages:
+  - apps/*
+minimumReleaseAgeExclude:
+  - jsdom@31.0.0
+  - vite@8.3.6

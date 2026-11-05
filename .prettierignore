@@ -1,0 +1,12 @@
+node_modules
+dist
+coverage
+target
+pnpm-lock.yaml
+Cargo.lock
+CLAUDE.md
+MASTER_DEVELOPMENT_PLAN.md
+README.md
+docs
+apps/desktop/src-tauri/icons
+apps/desktop/src-tauri/gen

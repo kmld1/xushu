@@ -1,0 +1,28 @@
+{
+  "name": "xushu",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0",
+    "pnpm": ">=12.16.1"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @xushu/desktop dev",
+    "build": "pnpm --filter @xushu/desktop build",
+    "typecheck": "pnpm --filter @xushu/desktop typecheck",
+    "lint": "pnpm --filter @xushu/desktop lint",
+    "test": "pnpm --filter @xushu/desktop test",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "tauri": "pnpm --filter @xushu/desktop tauri",
+    "rust:check": "cargo check --workspace --all-targets",
+    "rust:fmt": "cargo fmt --all -- --check",
+    "rust:clippy": "cargo clippy --workspace --all-targets -- -D warnings",
+    "rust:test": "cargo test --workspace"
+  },
+  "devDependencies": {
+    "prettier": "3.9.10"
+  }
+}
