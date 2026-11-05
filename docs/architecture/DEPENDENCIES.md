@@ -1,6 +1,6 @@
 # 依赖与工具链基线
 
-> 状态：**Phase 1 PASS**（2026-11-06）。
+> 状态：**Phase 2 PASS**（2026-11-06）。
 >
 > 本文件只记录实际安装、实际锁定并通过检查的版本。依赖升级必须重新生成
 > `pnpm-lock.yaml` / `Cargo.lock`，并复跑文末质量门禁。
@@ -28,7 +28,7 @@
 
 ## 2. 前端直接依赖
 
-锁文件：`pnpm-lock.yaml`（104 KB）；`pnpm install --frozen-lockfile` 退出码 0。
+锁文件：`pnpm-lock.yaml`（140 KB）；`pnpm install --frozen-lockfile` 退出码 0。
 
 ### 2.1 运行时
 
@@ -48,6 +48,12 @@
 | `tailwind-merge` | 3.7.0 | Tailwind 类名合并 |
 | `@radix-ui/react-slot` | 1.5.0 | shadcn/ui Button asChild |
 | `@radix-ui/react-label` | 2.1.17 | shadcn/ui Label |
+| `@radix-ui/react-dialog` | 1.3.1 | Dialog / ConfirmationDialog |
+| `@radix-ui/react-dropdown-menu` | 2.2.1 | 项目/任务行操作菜单 |
+| `@radix-ui/react-select` | 2.4.1 | 项目/状态/优先级筛选 |
+| `@radix-ui/react-tabs` | 1.2.1 | 项目活动/归档分区 |
+| `@radix-ui/react-tooltip` | 1.4.1 | 图标按钮提示 |
+| `sonner` | 2.0.8 | 操作 Toast 反馈 |
 
 ### 2.2 构建、检查与测试
 
@@ -109,6 +115,8 @@
 8. **Vitest 5.1.0 / jsdom 31.0.0** 与 Node 24.20.0、Vite 8.3.6 兼容；13 个前端测试通过。
 9. **rusqlite 0.41.1 bundled** 在 MSVC 14.51 + Windows SDK 10.0.26100 下实际编译、链接并运行；WAL、外键与迁移测试通过。
 10. `@tauri-apps/cli 2.12.4` 与 `tauri 2.12.5` 已在本机实际编译并启动。
+11. **Radix UI 1.x/2.x 与 sonner 2.0.8** 均声明支持 React 19；实际 typecheck、Lint、Vitest 与桌面启动通过。
+12. Phase 2 未新增 Rust crate；状态机、项目/任务服务、Git 只读检查使用现有 `rusqlite` / `serde` / `uuid` / `chrono` / `thiserror`。
 
 ## 5. 锁文件与复现策略
 
@@ -128,7 +136,9 @@
 - 数据库：Tauri `app_data_dir()` 下的 `xushu.db`；Windows 实测
   `%APPDATA%\dev.xushu.desktop\xushu.db`，不进入仓库。
 - PRAGMA：`foreign_keys=ON`、`journal_mode=WAL`、`synchronous=NORMAL`、`busy_timeout=5000`。
-- Schema：`schema_migrations` + `persistence_probes`；只存在 Phase 1 探针表。
+- Schema（迁移版本 2）：`schema_migrations`、`persistence_probes`、`projects`、`tasks`、
+  `acceptance_criteria`、`task_transitions`、`manual_confirmations`。
+- Phase 2 业务表使用 UUID、UTC RFC3339、外键、CHECK 约束、唯一根路径 key 与人工确认修订唯一索引。
 - Capabilities：仅 `core:default`；无 Shell / FS / SQL 插件权限。
 - CSP：
   - 生产：`default-src 'self'; connect-src ipc: http://ipc.localhost; ...; script-src 'self'; object-src 'none'; base-uri 'self'`
@@ -142,20 +152,20 @@
 | `pnpm install --frozen-lockfile` | 0 | 锁文件一致 |
 | `pnpm typecheck` | 0 | `tsc --noEmit` 通过 |
 | `pnpm lint` | 0 | ESLint 10，`--max-warnings 0` |
-| `pnpm test` | 0 | 4 个测试文件、13 个测试通过 |
-| `pnpm build` | 0 | Vite 生产构建通过 |
+| `pnpm test` | 0 | 7 个测试文件、39 个测试通过 |
+| `pnpm build` | 0 | Vite 生产构建通过；JS 719.50 kB / gzip 220.27 kB（有 >500 kB chunk 提示） |
 | `pnpm format` | 0 | Prettier 检查通过 |
 | `cargo check --workspace --all-targets --locked` | 0 | Rust workspace 通过 |
 | `cargo fmt --all -- --check` | 0 | rustfmt 通过 |
 | `cargo clippy --workspace --all-targets -- -D warnings` | 0 | Clippy 通过 |
-| `cargo test --workspace` | 0 | 1 个 lib 测试 + 12 个持久化集成测试通过 |
+| `cargo test --workspace` | 0 | 4 个 lib 测试 + 19 个业务集成测试 + 12 个持久化测试通过 |
 | `pnpm tauri info` | 0 | 环境与依赖版本被正确识别 |
 
 ## 8. 已规划但本阶段未安装
 
 - `xushu-hook` CLI（Phase 4）
 - Claude Code Hooks 相关依赖（Phase 4）
-- 项目/任务/验收业务表与对应 Rust 服务（Phase 2/3）
+- 自动验收命令运行器、证据存储与过期判定（Phase 3）
 - 备份/恢复、日志脱敏与安全加固依赖（Phase 6）
 - 安装包、签名与分发工具（Phase 7）
 

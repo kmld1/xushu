@@ -1,290 +1,268 @@
-import {
-  Activity,
-  AlertCircle,
-  CheckCircle2,
-  Database,
-  Layers3,
-  RefreshCw,
-  ShieldCheck,
-  XCircle,
-} from "lucide-react";
-import type { ReactNode } from "react";
+import { ArrowRight, FolderGit2, ListChecks, OctagonAlert, Plus, ShieldCheck } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router";
 
+import { EmptyState } from "@/components/empty-state";
+import { ErrorState } from "@/components/error-state";
+import { LoadingState } from "@/components/loading-state";
 import { PageHeader } from "@/components/page-header";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { PriorityBadge, StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { HealthBadge } from "@/features/system/health-badge";
-import { useAppInfo, useDatabaseHealth } from "@/features/system/queries";
-import type { DatabaseHealth } from "@/features/system/types";
+import { ImportProjectDialog } from "@/features/projects/import-project-dialog";
+import { ProjectGitSummary } from "@/features/projects/project-git-summary";
+import { CreateTaskDialog } from "@/features/tasks/create-task-dialog";
+import { useWorkspaceSummary } from "@/features/tasks/queries";
+import { SystemHealthCard } from "@/features/system/system-health-card";
+import { useCurrentProject } from "@/features/workspace/use-current-project";
+import { SignalRail } from "@/features/workspace/signal-rail";
+import type { Task } from "@/lib/domain";
+import { formatDateTime } from "@/lib/format";
 import { getErrorMessage } from "@/lib/ipc";
-import { cn } from "@/lib/utils";
 
-const phaseOneScope = [
-  {
-    title: "SQLite 持久化",
-    description: "版本化迁移、事务、外键、WAL 与完整性检查。",
-    icon: Database,
-  },
-  {
-    title: "受控 Tauri IPC",
-    description: "应用信息、健康状态、写入、列表与按 ID 读取。",
-    icon: ShieldCheck,
-  },
-  {
-    title: "React 桌面外壳",
-    description: "路由、深浅主题、错误边界、加载与空状态。",
-    icon: Layers3,
-  },
-  {
-    title: "跨进程验证",
-    description: "关闭应用后重新启动，仍能从 SQLite 读回原始测试记录。",
-    icon: Activity,
-  },
-];
-
-function HealthValue({ ok, children }: { ok: boolean; children: ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      {ok ? (
-        <CheckCircle2
-          className="size-3.5 text-emerald-600 dark:text-emerald-300"
-          aria-hidden="true"
-        />
-      ) : (
-        <XCircle className="size-3.5 text-destructive" aria-hidden="true" />
-      )}
-      {children}
-    </span>
-  );
-}
-
-function HealthItem({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="rounded-lg border bg-background/60 p-3">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="mt-1 text-sm font-medium">{value}</dd>
-    </div>
-  );
-}
-
-function HealthDetails({ health }: { health: DatabaseHealth }) {
-  return (
-    <div className="space-y-4">
-      {health.foreignKeyViolations ? (
-        <Alert variant="warning">
-          <AlertCircle className="mt-0.5 size-4" aria-hidden="true" />
-          <AlertTitle>检测到外键约束异常</AlertTitle>
-          <AlertDescription>
-            外键检查返回了违规记录，请先停止写入并检查本地数据库。
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <HealthItem label="数据库文件" value={health.databaseFile} />
-        <HealthItem label="Schema 版本" value={`v${health.schemaVersion}`} />
-        <HealthItem label="日志模式" value={health.journalMode.toUpperCase()} />
-        <HealthItem
-          label="外键约束"
-          value={
-            <HealthValue ok={health.foreignKeysEnabled}>
-              {health.foreignKeysEnabled ? "已开启" : "未开启"}
-            </HealthValue>
-          }
-        />
-        <HealthItem
-          label="完整性检查"
-          value={
-            <HealthValue ok={health.integrityOk}>
-              {health.integrityOk ? "通过" : "失败"}
-            </HealthValue>
-          }
-        />
-        <HealthItem label="测试记录" value={`${health.recordCount} 条`} />
-      </dl>
-    </div>
-  );
-}
-
-function HealthSkeleton() {
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
-      <span role="status" className="sr-only">
-        正在读取数据库健康状态
-      </span>
-      {[0, 1, 2, 3, 4, 5].map((item) => (
-        <div key={item} className="rounded-lg border p-3">
-          <Skeleton className="h-3 w-16" />
-          <Skeleton className="mt-2 h-4 w-24" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function AppInfoDetails() {
-  const appInfo = useAppInfo();
-
-  if (appInfo.isPending) {
+function CompactTaskList({
+  tasks,
+  emptyText,
+  showBlockReason = false,
+}: {
+  tasks: Task[];
+  emptyText: string;
+  showBlockReason?: boolean;
+}) {
+  if (tasks.length === 0) {
     return (
-      <div className="space-y-3" aria-busy="true">
-        <span role="status" className="sr-only">
-          正在读取应用信息
-        </span>
-        {[0, 1, 2, 3, 4].map((item) => (
-          <Skeleton key={item} className="h-4 w-full" />
-        ))}
-      </div>
-    );
-  }
-
-  if (appInfo.isError) {
-    return (
-      <Alert variant="destructive">
-        <AlertCircle className="mt-0.5 size-4" aria-hidden="true" />
-        <AlertTitle>无法读取应用信息</AlertTitle>
-        <AlertDescription>
-          <span className="block">{getErrorMessage(appInfo.error)}</span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="mt-3"
-            onClick={() => void appInfo.refetch()}
-          >
-            重试
-          </Button>
-        </AlertDescription>
-      </Alert>
+      <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+        {emptyText}
+      </p>
     );
   }
 
   return (
-    <dl className="space-y-3 text-sm">
-      {[
-        ["产品", appInfo.data.name],
-        ["应用版本", appInfo.data.version],
-        ["Tauri", appInfo.data.tauriVersion],
-        ["阶段", appInfo.data.phase],
-        ["平台", appInfo.data.platform],
-      ].map(([label, value]) => (
-        <div
-          key={label}
-          className="flex items-center justify-between gap-4 border-b pb-2 last:border-0"
+    <ul className="divide-y">
+      {tasks.map((task) => (
+        <li
+          key={task.id}
+          className="flex items-start justify-between gap-3 py-3 first:pt-0 last:pb-0"
         >
-          <dt className="text-muted-foreground">{label}</dt>
-          <dd className="text-right font-medium">{value}</dd>
-        </div>
+          <div className="min-w-0">
+            <Link
+              to={`/tasks/${task.id}`}
+              className="block truncate text-sm font-medium underline-offset-4 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              title={task.title}
+            >
+              {task.title}
+            </Link>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <StatusBadge status={task.status} />
+              <PriorityBadge priority={task.priority} />
+              <span className="text-[11px] text-muted-foreground">
+                {formatDateTime(task.updatedAt)}
+              </span>
+            </div>
+            {showBlockReason && task.blockReason ? (
+              <p className="mt-1 text-xs leading-5 text-destructive">{task.blockReason}</p>
+            ) : null}
+          </div>
+          <ArrowRight className="mt-1 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </li>
       ))}
-    </dl>
+    </ul>
   );
 }
 
 export function OverviewPage() {
-  const health = useDatabaseHealth();
+  const {
+    activeProjects,
+    currentProject,
+    isPending: projectsPending,
+    isError: projectsError,
+    error: projectsErrorValue,
+  } = useCurrentProject();
+  const summary = useWorkspaceSummary();
+  const [importOpen, setImportOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  if (projectsPending) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="工作台" description="目标、任务与验证状态的真实汇总。" />
+        <LoadingState rows={4} />
+      </div>
+    );
+  }
+
+  if (projectsError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="工作台" description="目标、任务与验证状态的真实汇总。" />
+        <ErrorState
+          title="无法读取项目"
+          message={getErrorMessage(projectsErrorValue)}
+          onRetry={() => window.location.reload()}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="概览"
-        description="查看本地数据库、运行环境与 Phase 1 已实际落地的能力。所有状态均来自真实后端查询。"
+        title="工作台"
+        description="当前项目、任务状态与需要处理的事项。所有数字来自本地 SQLite，不使用演示数据。"
         actions={
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void health.refetch()}
-            disabled={health.isFetching}
-          >
-            <RefreshCw
-              className={cn("size-4", health.isFetching && "animate-spin")}
-              aria-hidden="true"
-            />
-            刷新状态
-          </Button>
+          currentProject ? (
+            <>
+              <Button type="button" variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+                <FolderGit2 aria-hidden="true" />
+                导入项目
+              </Button>
+              <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
+                <Plus aria-hidden="true" />
+                新建任务
+              </Button>
+            </>
+          ) : (
+            <Button type="button" size="sm" onClick={() => setImportOpen(true)}>
+              <FolderGit2 aria-hidden="true" />
+              导入 Git 项目
+            </Button>
+          )
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-[1.6fr_1fr]">
-        <Card>
-          <CardHeader>
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <CardTitle>系统健康</CardTitle>
-                <CardDescription>
-                  Rust 后端对本地 SQLite 执行的真实查询，不是前端静态占位数据。
-                </CardDescription>
-              </div>
-              {health.data ? <HealthBadge ok={health.data.ok} /> : null}
-            </div>
-          </CardHeader>
-          <CardContent>
-            {health.isPending ? (
-              <HealthSkeleton />
-            ) : health.isError ? (
-              <Alert variant="destructive">
-                <AlertCircle className="mt-0.5 size-4" aria-hidden="true" />
-                <AlertTitle>无法读取数据库健康状态</AlertTitle>
-                <AlertDescription>
-                  <span className="block">{getErrorMessage(health.error)}</span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="mt-3"
-                    onClick={() => void health.refetch()}
-                  >
-                    重新检查
-                  </Button>
-                </AlertDescription>
-              </Alert>
-            ) : (
-              <HealthDetails health={health.data} />
-            )}
-          </CardContent>
-        </Card>
+      {activeProjects.length === 0 ? (
+        <>
+          <EmptyState
+            icon={FolderGit2}
+            title="还没有可管理的项目"
+            description="导入一个本地 Git 工作树后，即可创建任务、定义验收条件并跟踪可信状态。XUSHU 只做只读 Git 检查。"
+            action={
+              <Button type="button" onClick={() => setImportOpen(true)}>
+                <FolderGit2 aria-hidden="true" />
+                导入第一个项目
+              </Button>
+            }
+          />
+          <SystemHealthCard />
+        </>
+      ) : summary.isPending ? (
+        <LoadingState rows={5} />
+      ) : summary.isError ? (
+        <ErrorState
+          title="无法读取工作台数据"
+          message={getErrorMessage(summary.error)}
+          onRetry={() => void summary.refetch()}
+        />
+      ) : (
+        <>
+          <SignalRail counts={summary.data.taskCounts} />
 
-        <Card>
-          <CardHeader>
-            <CardTitle>应用信息</CardTitle>
-            <CardDescription>构建时与运行时的真实版本信息。</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <AppInfoDetails />
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Phase 1 已实现范围</CardTitle>
-          <CardDescription>只列出已经落地的能力，不代表 Phase 2 业务功能。</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {phaseOneScope.map((item) => {
-              const Icon = item.icon;
-              return (
-                <li key={item.title} className="flex gap-3 rounded-lg border bg-background/60 p-3">
-                  <Icon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
+          <div className="grid items-start gap-5 xl:grid-cols-[1.55fr_1fr]">
+            <div className="space-y-5">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <OctagonAlert className="size-4 text-warning" aria-hidden="true" />
+                    需要关注
+                  </CardTitle>
+                  <CardDescription>阻塞任务与等待验证的任务。</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
                   <div>
-                    <p className="text-sm font-medium">{item.title}</p>
-                    <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-                      {item.description}
-                    </p>
+                    <p className="mb-2 text-xs font-medium text-muted-foreground">已阻塞</p>
+                    <CompactTaskList
+                      tasks={summary.data.blockedTasks}
+                      emptyText="没有阻塞任务。"
+                      showBlockReason
+                    />
                   </div>
-                </li>
-              );
-            })}
-          </ul>
-          <Button asChild variant="outline" size="sm">
-            <Link to="/persistence">打开本地数据测试</Link>
-          </Button>
-        </CardContent>
-      </Card>
+                  <div>
+                    <p className="mb-2 text-xs font-medium text-muted-foreground">待验证</p>
+                    <CompactTaskList
+                      tasks={summary.data.awaitingTasks}
+                      emptyText="没有等待验证的任务。"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <CardTitle className="flex items-center gap-2">
+                        <ListChecks className="size-4 text-primary" aria-hidden="true" />
+                        最近任务
+                      </CardTitle>
+                      <CardDescription>按最近更新时间排序。</CardDescription>
+                    </div>
+                    <Button asChild variant="ghost" size="sm">
+                      <Link to="/tasks">查看全部</Link>
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <CompactTaskList tasks={summary.data.recentTasks} emptyText="还没有任务。" />
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="space-y-5">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FolderGit2 className="size-4 text-primary" aria-hidden="true" />
+                    当前项目
+                  </CardTitle>
+                  <CardDescription>只读 Git 状态与项目入口。</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {currentProject ? (
+                    <>
+                      <div>
+                        <Link
+                          to={`/projects/${currentProject.id}`}
+                          className="text-sm font-semibold underline-offset-4 hover:text-primary hover:underline"
+                        >
+                          {currentProject.name}
+                        </Link>
+                        <p
+                          className="mt-1 truncate font-mono text-[11px] text-muted-foreground"
+                          title={currentProject.rootPath}
+                        >
+                          {currentProject.rootPath}
+                        </p>
+                      </div>
+                      <ProjectGitSummary projectId={currentProject.id} />
+                      <p className="flex items-start gap-2 text-xs leading-5 text-muted-foreground">
+                        <ShieldCheck
+                          className="mt-0.5 size-3.5 shrink-0 text-primary"
+                          aria-hidden="true"
+                        />
+                        Git 操作全程只读，不修改仓库文件或历史。
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">没有可用的当前项目。</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              <SystemHealthCard compact />
+            </div>
+          </div>
+        </>
+      )}
+
+      {importOpen ? <ImportProjectDialog open onOpenChange={setImportOpen} /> : null}
+      {createOpen && currentProject ? (
+        <CreateTaskDialog
+          open
+          onOpenChange={setCreateOpen}
+          projectId={currentProject.id}
+          projectName={currentProject.name}
+        />
+      ) : null}
     </div>
   );
 }

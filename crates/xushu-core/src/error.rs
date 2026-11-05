@@ -24,6 +24,18 @@ pub enum CoreError {
     #[error("未找到指定记录")]
     NotFound,
 
+    #[error("资源冲突: {0}")]
+    Conflict(String),
+
+    #[error("非法状态转换: {from} -> {to}")]
+    InvalidTransition { from: String, to: String },
+
+    #[error("任务尚不能完成：{0}")]
+    TaskNotCompletable(String),
+
+    #[error("Git 检查失败: {0}")]
+    Git(String),
+
     #[error("数据库 schema 版本 {found} 高于当前应用支持的 {supported}")]
     SchemaTooNew { found: i64, supported: i64 },
 
@@ -41,6 +53,10 @@ impl CoreError {
             Self::LockPoisoned => "DATABASE_LOCK_ERROR",
             Self::Validation(_) => "VALIDATION_ERROR",
             Self::NotFound => "NOT_FOUND",
+            Self::Conflict(_) => "CONFLICT",
+            Self::InvalidTransition { .. } => "INVALID_TRANSITION",
+            Self::TaskNotCompletable(_) => "TASK_NOT_COMPLETABLE",
+            Self::Git(_) => "GIT_ERROR",
             Self::SchemaTooNew { .. } => "SCHEMA_TOO_NEW",
             Self::InvalidMigration(_) => "MIGRATION_CONFIG_ERROR",
         }

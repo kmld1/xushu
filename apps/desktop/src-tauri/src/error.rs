@@ -22,6 +22,15 @@ impl ApiError {
         match error {
             CoreError::Validation(message) => Self::new("VALIDATION_ERROR", message),
             CoreError::NotFound => Self::new("NOT_FOUND", "未找到指定记录"),
+            CoreError::Conflict(message) => Self::new("CONFLICT", message),
+            CoreError::InvalidTransition { from, to } => {
+                Self::new("INVALID_TRANSITION", format!("不允许从 {from} 转换到 {to}"))
+            }
+            CoreError::TaskNotCompletable(message) => Self::new("TASK_NOT_COMPLETABLE", message),
+            CoreError::Git(_) => Self::new(
+                "GIT_ERROR",
+                "Git 状态检查失败，请确认项目路径仍存在且是有效的 Git 工作树",
+            ),
             CoreError::Unavailable => Self::new("DATABASE_UNAVAILABLE", "本地数据库尚未就绪"),
             CoreError::LockPoisoned => {
                 Self::new("DATABASE_LOCK_ERROR", "本地数据库连接暂时不可用，请重试")

@@ -13,11 +13,18 @@ pub struct Migration {
 }
 
 /// 当前应用内置的迁移列表。只追加，不修改已发布迁移。
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "0001_create_persistence_probes",
-    sql: include_str!("../../migrations/0001_create_persistence_probes.sql"),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "0001_create_persistence_probes",
+        sql: include_str!("../../migrations/0001_create_persistence_probes.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "0002_projects_tasks",
+        sql: include_str!("../../migrations/0002_projects_tasks.sql"),
+    },
+];
 
 /// 一次迁移执行的结果。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

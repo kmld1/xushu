@@ -10,19 +10,22 @@ XUSHU 不替代 Claude Code、编辑器或终端，也不把 AI 的“已完成�
 
 ## 当前状态
 
-**Phase 1（桌面基础与本地持久化）：PASS（2026-11-06）。**
+**Phase 2（项目管理、任务系统与状态机）：PASS（2026-11-06）。**
 
-Phase 1 已实际完成并验证：
+已实际完成并验证：
 
-- Rust SQLite 持久化：WAL、外键、事务、完整性检查；
-- 版本化迁移：`schema_migrations` 记录、失败回滚、重复执行幂等、拒绝 schema 降级；
-- 受限 Tauri IPC：应用信息、数据库健康、写入/列表/按 ID 读取测试记录；
-- React 桌面外壳：HashRouter、侧边导航、深浅主题、shadcn/ui 基础组件、错误边界、加载/错误/空状态；
-- 真实跨进程验证：写入记录 → 完全关闭应用 → 重新启动 → 通过 UI/IPC 读回同一 ID、内容与时间。
+- 导入本地 Git 项目，只读检查根目录、分支、HEAD、dirty、unborn 与 detached HEAD；
+- 项目重命名、软归档与恢复；不删除磁盘项目或任务数据；
+- 创建/编辑/归档/恢复任务，按项目、状态、关键词筛选；
+- 验收条件新增/编辑/删除，自动/人工类型与必需/可选；
+- Rust 统一状态机：draft / ready / running / awaiting_verification / done / blocked / cancelled；
+- 人工确认记录与修订绑定；编辑任务/条件或返工后旧确认失效；
+- 完成门禁：必需条件未满足时禁止 done；Phase 2 没有自动验证引擎，必需自动条件不会伪造成 PASS；
+- 真实桌面 E2E：导入项目 → 创建任务 → 添加人工验收 → 推进状态 → 确认 → 完成 → 重启后仍为 done 且确认保留。
 
-**尚未实现（Phase 2+）：** 项目/任务/验收状态机、独立验收命令执行、Claude Code Hooks、决策记忆、备份恢复、安装包与 macOS 适配。Phase 1 只有一个明确标记的 `persistence_probes` 测试表，不是业务数据模型。
+**尚未实现（Phase 3+）：** 自动验证命令执行器、真实自动验收证据、证据过期判定、Claude Code Hooks、决策记忆、备份恢复、安装包与 macOS 适配。
 
-详见 [`docs/phases/PHASE_1_REPORT.md`](docs/phases/PHASE_1_REPORT.md)。
+详见 [`docs/phases/PHASE_2_REPORT.md`](docs/phases/PHASE_2_REPORT.md)。
 
 ## 冻结技术栈
 
@@ -35,7 +38,7 @@ Phase 1 已实际完成并验证：
 | 表单与校验 | React Hook Form + Zod |
 | 核心服务 | Rust（Tauri Commands + 领域服务） |
 | 数据库 | SQLite + rusqlite + 版本化迁移 |
-| Git | Rust 以参数数组只读调用本机 `git`（后续阶段） |
+| Git | Rust 以参数数组只读调用本机 `git` |
 | Claude Code 接入 | 项目级 Hooks（Phase 4，尚未实现） |
 | 测试 | Vitest + React Testing Library + `cargo test` |
 | 包管理 | pnpm + Cargo workspace |
@@ -76,24 +79,35 @@ cargo test --workspace
 pnpm tauri dev
 ```
 
-`pnpm tauri dev` 会先启动 Vite（`http://localhost:1420`），再编译并运行 `xushu-desktop.exe`。首次编译需要下载并构建 Tauri/rusqlite 依赖，耗时较长。
+首次编译需要下载并构建 Tauri/rusqlite 依赖，耗时较长。`pnpm build` 当前会产生约
+719 KB（gzip 220 KB）的单 chunk 及 >500 KB 提示；这是已知优化项，不影响功能。
 
-如果系统内存紧张，可限制 Cargo 并行编译数：
+## 使用流程
 
-```bash
-CARGO_BUILD_JOBS=2 pnpm tauri dev
-```
+1. **项目**：输入本地 Git 工作树路径导入；XUSHU 只读检查，不修改仓库。
+2. **任务**：在当前项目中创建任务；初始为草稿。
+3. **验收条件**：至少添加一个必需条件，才能将任务推进到就绪。
+4. **状态**：按 Rust 状态机推进；阻塞/取消必须填写原因。
+5. **人工确认**：任务进入 `待验证` 后，人工确认必需的人工验收条件。
+6. **完成**：所有必需条件满足后，`标记完成` 才可用；含必需自动条件的任务在 Phase 3 前不能完成。
+7. **恢复**：重启应用后，项目、任务、条件、确认与状态历史均保留。
 
 ## 本地数据
 
 - 数据库文件：Tauri 应用数据目录下的 `xushu.db`。Windows 实测为
   `%APPDATA%\dev.xushu.desktop\xushu.db`。
 - 数据库及 WAL/SHM 文件不进入 Git 仓库，界面不展示绝对路径。
-- Phase 1 数据表：
-  - `schema_migrations`：迁移版本记录；
-  - `persistence_probes`：持久化测试记录（非 Phase 2 业务表）。
+- Schema 版本 2：
+  - `schema_migrations`
+  - `persistence_probes`（Phase 1 诊断）
+  - `projects`
+  - `tasks`
+  - `acceptance_criteria`
+  - `task_transitions`
+  - `manual_confirmations`
 - 开启 `foreign_keys`、WAL、`synchronous=NORMAL` 和 5 秒 busy timeout。
 - 迁移在事务中执行，失败回滚；重复执行幂等；数据库版本高于当前应用时拒绝降级。
+- 项目/任务归档为软归档；移除不删除磁盘文件或历史数据。
 
 ## 工程结构
 
@@ -101,50 +115,59 @@ CARGO_BUILD_JOBS=2 pnpm tauri dev
 D:\MyProject\xushu\
 ├── apps/desktop/
 │   ├── src/
-│   │   ├── app/                    布局、路由 Providers、主题同步
-│   │   ├── components/             错误边界、主题控件、shadcn/ui 组件
+│   │   ├── app/                     App Shell、Providers、主题同步
+│   │   ├── components/              PageHeader、状态/状态轨道/历史、shadcn/ui
 │   │   ├── features/
-│   │   │   ├── persistence/        测试记录 API、查询、表单、列表
-│   │   │   └── system/             应用信息与数据库健康查询
-│   │   ├── lib/                    IPC 包装、类名工具
-│   │   ├── pages/                  概览、本地数据、设置、404
-│   │   ├── stores/                 主题 Zustand store
-│   │   └── test/                   Vitest 设置
+│   │   │   ├── projects/            项目 API、导入、Git 状态、操作菜单
+│   │   │   ├── tasks/               任务 API、表单、验收条件、状态操作
+│   │   │   ├── workspace/           当前项目、Signal Rail
+│   │   │   ├── system/              应用信息与数据库健康
+│   │   │   └── persistence/         Phase 1 持久化探针
+│   │   ├── pages/                   工作台、项目、项目详情、任务、任务详情、诊断、设置
+│   │   ├── lib/                     IPC、领域类型、格式化、Zod 辅助
+│   │   └── stores/                  主题、当前项目 Zustand
 │   ├── src-tauri/
-│   │   ├── src/commands.rs         五个 IPC 命令
-│   │   ├── src/error.rs            结构化 IPC 错误
-│   │   ├── src/state.rs            应用状态与数据库初始化
-│   │   ├── src/lib.rs              Tauri Builder
-│   │   ├── capabilities/default.json
-│   │   └── tauri.conf.json         CSP / devCsp / 窗口配置
-│   └── components.json             shadcn/ui 配置
+│   │   ├── src/commands.rs          Phase 1 五个命令
+│   │   ├── src/business_commands.rs 项目/任务/验收/工作台命令
+│   │   ├── src/state.rs             数据库状态
+│   │   └── capabilities/default.json
+│   └── components.json
 ├── crates/xushu-core/
-│   ├── migrations/                 版本化 SQL 迁移
-│   ├── src/db/                     数据库、PRAGMA、迁移、事务、健康检查
-│   ├── src/probe.rs                测试记录校验与持久化
-│   ├── src/error.rs                CoreError
-│   └── tests/persistence.rs        12 个持久化集成测试
+│   ├── migrations/                  迁移 1（探针）+ 迁移 2（业务表）
+│   ├── src/db/                      数据库、PRAGMA、迁移、事务、健康检查
+│   ├── src/git.rs                   只读 Git 检查（参数数组、超时）
+│   ├── src/project.rs               项目 Repository/Service
+│   ├── src/task.rs                  任务/验收/确认 Repository/Service
+│   ├── src/state_machine.rs         状态转换图
+│   ├── src/models.rs                领域模型
+│   └── tests/                       持久化 + 业务集成测试
 ├── docs/
-│   ├── architecture/
-│   │   ├── ADR/                    0001 技术栈、0002 SQLite/IPC
-│   │   └── DEPENDENCIES.md
-│   └── phases/
-│       ├── PHASE_0_REPORT.md
-│       └── PHASE_1_REPORT.md
+│   ├── architecture/ADR/            0001 技术栈、0002 SQLite/IPC、0003 项目/任务/状态机
+│   ├── design/DESIGN_SYSTEM.md      XUSHU 设计系统
+│   ├── design/UI_AUDIT.md           UI 审计与人工视觉验收状态
+│   └── phases/                      Phase 0/1/2 报告
 ├── Cargo.toml / Cargo.lock
 ├── package.json / pnpm-workspace.yaml / pnpm-lock.yaml
 └── rust-toolchain.toml
 ```
 
+## 设计系统与视觉验收
+
+- 统一设计系统：[`docs/design/DESIGN_SYSTEM.md`](docs/design/DESIGN_SYSTEM.md)
+- UI 审计：[`docs/design/UI_AUDIT.md`](docs/design/UI_AUDIT.md)
+- 使用 `frontend-design` Skill 制定并执行统一视觉语言；冷石墨 + 氧化青 + 黄铜色板，状态轨道/历史作为“序枢”识别元素。
+- **视觉状态：VISUAL_REVIEW_PENDING。** 自动化类型/Lint/测试/构建通过不等于视觉验收通过；需要用户手动截图确认深浅主题、900/1400px 窗口、空/错误/待验证状态。
+
 ## 安全与隐私基线
 
-- 前端只调用显式注册的五个 Tauri Commands；没有任意 SQL、Shell 或通用文件系统权限。
-- Tauri capabilities 仅授予 `core:default`。
-- Rust 对写入输入再次校验；IPC 错误返回 `{ code, message }`，不返回绝对路径、SQL 或凭据。
-- CSP 已配置生产与开发两套策略：生产 `script-src 'self'`；开发额外允许 Vite HMR。
+- 前端只调用显式注册的 Tauri Commands；没有任意 SQL、Shell 或通用文件系统权限。
+- Tauri capabilities 仅 `core:default`。
+- Git 只读检查使用可执行文件 + 参数数组，5 秒超时；不执行任何 Git 写操作。
+- Rust 对项目/任务/验收输入再次校验；IPC 错误返回 `{ code, message }`，不返回绝对路径、SQL 或凭据。
+- 状态机与完成门禁只在 Rust 实现；前端只展示后端返回的允许转换与 blockers。
+- CSP 保持生产/开发两套策略；生产 `script-src 'self'`。
 - 不读取或输出 API Key、`.env`、SSH 私钥、token 等敏感信息。
-- Claude Code Hooks 尚未实现；V1 不依赖云服务、登录系统或远程数据库。
-- 生产 CSP、安装包与 macOS 尚未实机验证，不能把当前 PASS 视为最终发布验证。
+- 不展示虚假项目、任务、KPI 或自动验收 PASS。
 
 ## 文档
 
@@ -153,5 +176,9 @@ D:\MyProject\xushu\
 - [依赖与工具链基线](docs/architecture/DEPENDENCIES.md)
 - [ADR-0001](docs/architecture/ADR/0001-local-first-tauri-stack.md)
 - [ADR-0002](docs/architecture/ADR/0002-sqlite-persistence-and-ipc.md)
+- [ADR-0003](docs/architecture/ADR/0003-projects-tasks-state-machine.md)
 - [Phase 0 报告](docs/phases/PHASE_0_REPORT.md)
 - [Phase 1 报告](docs/phases/PHASE_1_REPORT.md)
+- [Phase 2 报告](docs/phases/PHASE_2_REPORT.md)
+- [设计系统](docs/design/DESIGN_SYSTEM.md)
+- [UI 审计](docs/design/UI_AUDIT.md)

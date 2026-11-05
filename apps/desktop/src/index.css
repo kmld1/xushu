@@ -22,56 +22,126 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-line-strong: var(--line-strong);
+  --color-surface-raised: var(--surface-raised);
+  --color-status-draft: var(--status-draft);
+  --color-status-ready: var(--status-ready);
+  --color-status-running: var(--status-running);
+  --color-status-awaiting: var(--status-awaiting);
+  --color-status-done: var(--status-done);
+  --color-status-blocked: var(--status-blocked);
+  --color-status-cancelled: var(--status-cancelled);
+  --color-verification-pass: var(--verification-pass);
+  --color-verification-fail: var(--verification-fail);
+  --color-verification-not-run: var(--verification-not-run);
+  --color-verification-inconclusive: var(--verification-inconclusive);
+  --color-verification-stale: var(--verification-stale);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --font-sans:
+    "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
+  --shadow-overlay: 0 16px 40px -16px rgb(9 18 20 / 0.35);
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(0.985 0.002 247.839);
-  --foreground: oklch(0.208 0.042 265.755);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.208 0.042 265.755);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.208 0.042 265.755);
-  --primary: oklch(0.5 0.134 242.749);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.968 0.007 247.896);
-  --secondary-foreground: oklch(0.208 0.042 265.755);
-  --muted: oklch(0.968 0.007 247.896);
-  --muted-foreground: oklch(0.554 0.046 257.417);
-  --accent: oklch(0.951 0.026 236.824);
-  --accent-foreground: oklch(0.391 0.09 240.876);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.929 0.013 255.508);
-  --input: oklch(0.929 0.013 255.508);
-  --ring: oklch(0.685 0.169 237.323);
+  --background: #f3f6f5;
+  --foreground: #192428;
+  --card: #ffffff;
+  --card-foreground: #192428;
+  --popover: #ffffff;
+  --popover-foreground: #192428;
+  --primary: #16796f;
+  --primary-foreground: #f7fffd;
+  --secondary: #eaf0ee;
+  --secondary-foreground: #192428;
+  --muted: #eaf0ee;
+  --muted-foreground: #5e7077;
+  --accent: #dff1ed;
+  --accent-foreground: #105f58;
+  --destructive: #b04444;
+  --destructive-foreground: #ffffff;
+  --border: #d7e0de;
+  --input: #d7e0de;
+  --ring: #16796f;
+  --success: #237a52;
+  --success-foreground: #ffffff;
+  --warning: #9a6a1f;
+  --warning-foreground: #ffffff;
+  --info: #35679a;
+  --info-foreground: #ffffff;
+  --line-strong: #bccac7;
+  --surface-raised: #ffffff;
+  --status-draft: #5e7077;
+  --status-ready: #35679a;
+  --status-running: #16796f;
+  --status-awaiting: #9a6a1f;
+  --status-done: #237a52;
+  --status-blocked: #b04444;
+  --status-cancelled: #7a888c;
+  --verification-pass: #237a52;
+  --verification-fail: #b04444;
+  --verification-not-run: #6b7a7f;
+  --verification-inconclusive: #9a6a1f;
+  --verification-stale: #6d5a91;
 }
 
 .dark {
-  --background: oklch(0.129 0.042 264.695);
-  --foreground: oklch(0.984 0.003 247.858);
-  --card: oklch(0.208 0.042 265.755);
-  --card-foreground: oklch(0.984 0.003 247.858);
-  --popover: oklch(0.208 0.042 265.755);
-  --popover-foreground: oklch(0.984 0.003 247.858);
-  --primary: oklch(0.746 0.16 232.661);
-  --primary-foreground: oklch(0.208 0.042 265.755);
-  --secondary: oklch(0.279 0.041 260.031);
-  --secondary-foreground: oklch(0.984 0.003 247.858);
-  --muted: oklch(0.279 0.041 260.031);
-  --muted-foreground: oklch(0.704 0.04 256.788);
-  --accent: oklch(0.293 0.066 243.157);
-  --accent-foreground: oklch(0.901 0.058 230.902);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 0.1);
-  --input: oklch(1 0 0 / 0.15);
-  --ring: oklch(0.685 0.169 237.323);
+  --background: #0d1416;
+  --foreground: #e5eceb;
+  --card: #141d20;
+  --card-foreground: #e5eceb;
+  --popover: #1a2529;
+  --popover-foreground: #e5eceb;
+  --primary: #62cfc2;
+  --primary-foreground: #0d1416;
+  --secondary: #1a2529;
+  --secondary-foreground: #e5eceb;
+  --muted: #1a2529;
+  --muted-foreground: #92a5a8;
+  --accent: #163a37;
+  --accent-foreground: #8fe0d6;
+  --destructive: #e08585;
+  --destructive-foreground: #1a0e0e;
+  --border: #263538;
+  --input: #35494d;
+  --ring: #62cfc2;
+  --success: #71ce9e;
+  --success-foreground: #08130d;
+  --warning: #d9ae63;
+  --warning-foreground: #1d1508;
+  --info: #8db6e8;
+  --info-foreground: #0a1420;
+  --line-strong: #35494d;
+  --surface-raised: #1a2529;
+  --status-draft: #92a5a8;
+  --status-ready: #8db6e8;
+  --status-running: #62cfc2;
+  --status-awaiting: #d9ae63;
+  --status-done: #71ce9e;
+  --status-blocked: #e08585;
+  --status-cancelled: #7a888c;
+  --verification-pass: #71ce9e;
+  --verification-fail: #e08585;
+  --verification-not-run: #92a5a8;
+  --verification-inconclusive: #d9ae63;
+  --verification-stale: #b3a1d6;
+}
+
+html {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
 }
 
 html,
@@ -83,8 +153,14 @@ body,
 body {
   margin: 0;
   font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--primary) 28%, transparent);
 }
 
 @layer base {
@@ -94,6 +170,13 @@ body {
 
   body {
     @apply bg-background text-foreground;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
   }
 }
 

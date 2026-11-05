@@ -21,7 +21,7 @@ pub fn get_app_info() -> AppInfo {
         name: xushu_core::APP_NAME.to_owned(),
         version: env!("CARGO_PKG_VERSION").to_owned(),
         tauri_version: tauri::VERSION.to_owned(),
-        phase: "Phase 1".to_owned(),
+        phase: "Phase 2".to_owned(),
         platform: std::env::consts::OS.to_owned(),
     }
 }

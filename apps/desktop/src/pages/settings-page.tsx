@@ -79,9 +79,9 @@ function DataPrivacyCard() {
     <Card>
       <CardHeader>
         <CardTitle>本地数据与隐私</CardTitle>
-        <CardDescription>Phase 1 的数据库边界。</CardDescription>
+        <CardDescription>XUSHU 的本地边界与最小权限。</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4 text-sm leading-6 text-muted-foreground">
+      <CardContent className="grid gap-4 text-sm leading-6 text-muted-foreground md:grid-cols-2">
         <div className="flex gap-3">
           <Database className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
           <p>
@@ -96,11 +96,13 @@ function DataPrivacyCard() {
         <div className="flex gap-3">
           <ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
           <p>
-            前端没有任意 SQL、Shell 命令或通用文件系统权限。所有数据库写入都经过 Rust
-            侧输入校验和固定命令白名单。
+            前端只能调用固定的 Tauri Commands；没有任意 SQL、Shell 或通用文件系统权限。 Rust
+            领域层负责输入校验、状态机与事务。
           </p>
         </div>
-        <p className="text-xs">本页不展示绝对路径、API Key、token 或其他凭据。V1 不包含云同步。</p>
+        <p className="text-xs md:col-span-2">
+          本页不展示绝对路径、API Key、token 或其他凭据。V1 不包含云同步。
+        </p>
       </CardContent>
     </Card>
   );
@@ -114,7 +116,7 @@ export function SettingsPage() {
     <div className="space-y-6">
       <PageHeader title="设置" description="管理界面主题并查看本地应用边界。当前设置保存在本机。" />
 
-      <div className="grid items-start gap-6 xl:grid-cols-[1.2fr_1fr]">
+      <div className="grid items-start gap-5 xl:grid-cols-[1.2fr_1fr]">
         <Card>
           <CardHeader>
             <CardTitle>外观</CardTitle>
@@ -132,9 +134,9 @@ export function SettingsPage() {
                     <label
                       key={option.mode}
                       className={cn(
-                        "relative flex cursor-pointer flex-col gap-2 rounded-lg border p-4 transition-colors",
+                        "relative flex cursor-pointer flex-col gap-2 rounded-md border p-4 transition-colors",
                         "focus-within:ring-2 focus-within:ring-ring",
-                        active ? "border-primary bg-accent/60" : "hover:bg-accent/40",
+                        active ? "border-primary bg-accent/60" : "hover:bg-surface-raised",
                       )}
                     >
                       <input
@@ -155,6 +157,11 @@ export function SettingsPage() {
                 })}
               </div>
             </fieldset>
+            <div className="mt-4 flex justify-end">
+              <Button type="button" variant="ghost" size="sm" onClick={() => setMode("system")}>
+                恢复跟随系统
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
@@ -162,12 +169,6 @@ export function SettingsPage() {
       </div>
 
       <DataPrivacyCard />
-
-      <div className="flex justify-end">
-        <Button type="button" variant="outline" onClick={() => setMode("system")}>
-          恢复跟随系统
-        </Button>
-      </div>
     </div>
   );
 }
