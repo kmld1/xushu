@@ -1,6 +1,15 @@
 //! 序枢 XUSHU 的核心领域库。
 //!
-//! Phase 0 仅保留 workspace 骨架；领域模型、状态机与 SQLite 仓储将在后续阶段实现。
+//! Phase 1 提供 SQLite 打开/配置、幂等迁移、事务、完整性检查与本地测试记录
+//! 的持久化。任务、项目与验收状态机仍属于后续阶段。
+
+pub mod db;
+pub mod error;
+pub mod probe;
+
+pub use db::{run_migrations, Database, DatabaseHealth, Migration, MigrationReport, MIGRATIONS};
+pub use error::CoreError;
+pub use probe::{parse_created_at, CreateProbeInput, ProbeRecord};
 
 /// 产品展示名称。
 pub const APP_NAME: &str = "序枢 XUSHU";

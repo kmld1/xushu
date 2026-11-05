@@ -6,3 +6,6 @@ members = ["apps/desktop/src-tauri", "crates/xushu-core"]
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.90"
+
+[workspace.dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }

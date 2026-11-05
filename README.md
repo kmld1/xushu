@@ -10,18 +10,19 @@ XUSHU 不替代 Claude Code、编辑器或终端，也不把 AI 的“已完成�
 
 ## 当前状态
 
-**Phase 0（仓库体检与工程启动）：PASS（2026-11-05）。**
+**Phase 1（桌面基础与本地持久化）：PASS（2026-11-06）。**
 
-本轮已完成并实测：
+Phase 1 已实际完成并验证：
 
-- Tauri 2 + React + TypeScript + Vite 最小桌面工程可编译、可启动；
-- pnpm workspace 与 Cargo workspace 可独立复现安装；
-- `pnpm-lock.yaml` 与 `Cargo.lock` 已生成，冻结锁文件检查通过；
-- TypeScript 类型检查、ESLint、Prettier、Vitest、Vite 生产构建全部通过；
-- `cargo check --locked`、`cargo fmt --check`、`cargo clippy -D warnings`、`cargo test` 全部通过；
-- 实际启动桌面程序，确认主窗口与 WebView2 正常创建。
+- Rust SQLite 持久化：WAL、外键、事务、完整性检查；
+- 版本化迁移：`schema_migrations` 记录、失败回滚、重复执行幂等、拒绝 schema 降级；
+- 受限 Tauri IPC：应用信息、数据库健康、写入/列表/按 ID 读取测试记录；
+- React 桌面外壳：HashRouter、侧边导航、深浅主题、shadcn/ui 基础组件、错误边界、加载/错误/空状态；
+- 真实跨进程验证：写入记录 → 完全关闭应用 → 重新启动 → 通过 UI/IPC 读回同一 ID、内容与时间。
 
-Phase 0 只包含工程骨架，**尚未实现**数据库、IPC、项目/任务管理、验收引擎、Hooks、路由与产品页面。详见 [`docs/phases/PHASE_0_REPORT.md`](docs/phases/PHASE_0_REPORT.md)。
+**尚未实现（Phase 2+）：** 项目/任务/验收状态机、独立验收命令执行、Claude Code Hooks、决策记忆、备份恢复、安装包与 macOS 适配。Phase 1 只有一个明确标记的 `persistence_probes` 测试表，不是业务数据模型。
+
+详见 [`docs/phases/PHASE_1_REPORT.md`](docs/phases/PHASE_1_REPORT.md)。
 
 ## 冻结技术栈
 
@@ -34,19 +35,17 @@ Phase 0 只包含工程骨架，**尚未实现**数据库、IPC、项目/任务�
 | 表单与校验 | React Hook Form + Zod |
 | 核心服务 | Rust（Tauri Commands + 领域服务） |
 | 数据库 | SQLite + rusqlite + 版本化迁移 |
-| Git | Rust 以参数数组只读调用本机 `git` |
-| Claude Code 接入 | 项目级 Hooks（用户显式授权）+ `xushu-hook` CLI |
+| Git | Rust 以参数数组只读调用本机 `git`（后续阶段） |
+| Claude Code 接入 | 项目级 Hooks（Phase 4，尚未实现） |
 | 测试 | Vitest + React Testing Library + `cargo test` |
 | 包管理 | pnpm + Cargo workspace |
-
-> 上表是 V1 的冻结目标。Phase 0 只安装了实际用到的 React/Vite/Tailwind/Tauri 与质量工具；Router、Query、Zustand、RHF、Zod、shadcn/ui、rusqlite 等将在对应阶段引入。
 
 ## 环境先决条件
 
 | 组件 | 要求 | 当前实测 |
 |---|---|---|
 | Windows | Windows 11 x64 | 10.0.26200 ✅ |
-| Node.js | `^22.22.2` 或 `^24.15.0`（jsdom 31 / Vite 8） | v24.20.0 ✅ |
+| Node.js | `^22.22.2` 或 `^24.15.0` | v24.20.0 ✅ |
 | pnpm | 12.16.1（`packageManager` 固定） | 12.16.1 ✅ |
 | Git | 可用 | 2.56.0.windows.2 ✅ |
 | Rust | stable MSVC，Tauri 2.12 MSRV 1.90 | 1.99.1 ✅ |
@@ -77,43 +76,75 @@ cargo test --workspace
 pnpm tauri dev
 ```
 
-`pnpm tauri dev` 会先启动 Vite（`http://localhost:1420`），再编译并运行 `xushu-desktop.exe`。首次编译需要下载并构建 Tauri 依赖，耗时较长。
+`pnpm tauri dev` 会先启动 Vite（`http://localhost:1420`），再编译并运行 `xushu-desktop.exe`。首次编译需要下载并构建 Tauri/rusqlite 依赖，耗时较长。
+
+如果系统内存紧张，可限制 Cargo 并行编译数：
+
+```bash
+CARGO_BUILD_JOBS=2 pnpm tauri dev
+```
+
+## 本地数据
+
+- 数据库文件：Tauri 应用数据目录下的 `xushu.db`。Windows 实测为
+  `%APPDATA%\dev.xushu.desktop\xushu.db`。
+- 数据库及 WAL/SHM 文件不进入 Git 仓库，界面不展示绝对路径。
+- Phase 1 数据表：
+  - `schema_migrations`：迁移版本记录；
+  - `persistence_probes`：持久化测试记录（非 Phase 2 业务表）。
+- 开启 `foreign_keys`、WAL、`synchronous=NORMAL` 和 5 秒 busy timeout。
+- 迁移在事务中执行，失败回滚；重复执行幂等；数据库版本高于当前应用时拒绝降级。
 
 ## 工程结构
 
 ```text
 D:\MyProject\xushu\
-├── apps/
-│   └── desktop/
-│       ├── src/                      React 入口、页面骨架、Vitest 测试
-│       ├── src-tauri/                Tauri Rust 应用
-│       │   ├── capabilities/         最小能力集（core:default）
-│       │   ├── icons/                桌面图标
-│       │   ├── src/                  main.rs / lib.rs
-│       │   ├── build.rs
-│       │   └── tauri.conf.json
-│       ├── index.html
-│       ├── vite.config.ts
-│       ├── vitest.config.ts
-│       ├── eslint.config.js
-│       └── tsconfig.json
-├── crates/
-│   └── xushu-core/                   核心领域库骨架（Phase 0 仅常量与测试）
+├── apps/desktop/
+│   ├── src/
+│   │   ├── app/                    布局、路由 Providers、主题同步
+│   │   ├── components/             错误边界、主题控件、shadcn/ui 组件
+│   │   ├── features/
+│   │   │   ├── persistence/        测试记录 API、查询、表单、列表
+│   │   │   └── system/             应用信息与数据库健康查询
+│   │   ├── lib/                    IPC 包装、类名工具
+│   │   ├── pages/                  概览、本地数据、设置、404
+│   │   ├── stores/                 主题 Zustand store
+│   │   └── test/                   Vitest 设置
+│   ├── src-tauri/
+│   │   ├── src/commands.rs         五个 IPC 命令
+│   │   ├── src/error.rs            结构化 IPC 错误
+│   │   ├── src/state.rs            应用状态与数据库初始化
+│   │   ├── src/lib.rs              Tauri Builder
+│   │   ├── capabilities/default.json
+│   │   └── tauri.conf.json         CSP / devCsp / 窗口配置
+│   └── components.json             shadcn/ui 配置
+├── crates/xushu-core/
+│   ├── migrations/                 版本化 SQL 迁移
+│   ├── src/db/                     数据库、PRAGMA、迁移、事务、健康检查
+│   ├── src/probe.rs                测试记录校验与持久化
+│   ├── src/error.rs                CoreError
+│   └── tests/persistence.rs        12 个持久化集成测试
 ├── docs/
 │   ├── architecture/
-│   │   ├── ADR/                      架构决策
-│   │   └── DEPENDENCIES.md           实测工具链与锁定版本
+│   │   ├── ADR/                    0001 技术栈、0002 SQLite/IPC
+│   │   └── DEPENDENCIES.md
 │   └── phases/
-│       └── PHASE_0_REPORT.md         Phase 0 验收报告（含首轮阻塞历史）
-├── Cargo.toml                        Cargo workspace
-├── Cargo.lock
-├── package.json                      pnpm 根工具链
-├── pnpm-workspace.yaml
-├── pnpm-lock.yaml
+│       ├── PHASE_0_REPORT.md
+│       └── PHASE_1_REPORT.md
+├── Cargo.toml / Cargo.lock
+├── package.json / pnpm-workspace.yaml / pnpm-lock.yaml
 └── rust-toolchain.toml
 ```
 
-`apps/desktop/src-tauri/gen/` 为 Tauri 构建期生成物，已被 `.gitignore` 排除。移动端图标未生成；当前目标是 Windows 桌面，macOS 后续适配。
+## 安全与隐私基线
+
+- 前端只调用显式注册的五个 Tauri Commands；没有任意 SQL、Shell 或通用文件系统权限。
+- Tauri capabilities 仅授予 `core:default`。
+- Rust 对写入输入再次校验；IPC 错误返回 `{ code, message }`，不返回绝对路径、SQL 或凭据。
+- CSP 已配置生产与开发两套策略：生产 `script-src 'self'`；开发额外允许 Vite HMR。
+- 不读取或输出 API Key、`.env`、SSH 私钥、token 等敏感信息。
+- Claude Code Hooks 尚未实现；V1 不依赖云服务、登录系统或远程数据库。
+- 生产 CSP、安装包与 macOS 尚未实机验证，不能把当前 PASS 视为最终发布验证。
 
 ## 文档
 
@@ -121,13 +152,6 @@ D:\MyProject\xushu\
 - [CLAUDE.md](CLAUDE.md)
 - [依赖与工具链基线](docs/architecture/DEPENDENCIES.md)
 - [ADR-0001](docs/architecture/ADR/0001-local-first-tauri-stack.md)
+- [ADR-0002](docs/architecture/ADR/0002-sqlite-persistence-and-ipc.md)
 - [Phase 0 报告](docs/phases/PHASE_0_REPORT.md)
-
-## 安全与隐私基线
-
-- 不读取或输出 API Key、`.env`、SSH 私钥、token 等敏感信息。
-- 前端只调用受限 Tauri Commands；数据库、路径与命令权限在 Rust 侧校验。
-- 验证命令使用可执行文件 + 参数数组，禁止 shell 字符串拼接；执行前需用户确认。
-- Claude Code Hook 默认只采集白名单元数据，不采集 prompt 原文、工具完整输入输出、transcript 或源码。
-- 本地优先：V1 不依赖云服务、登录系统或远程数据库。
-- Phase 0 的 Tauri CSP 仍为 `null`；CSP 收紧属于后续安全加固任务，不能把当前状态视为最终安全配置。
+- [Phase 1 报告](docs/phases/PHASE_1_REPORT.md)
