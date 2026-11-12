@@ -42,6 +42,9 @@ pub enum CoreError {
     #[error("验证运行错误: {0}")]
     Verification(String),
 
+    #[error("Claude Code 接入错误: {0}")]
+    Claude(String),
+
     #[error("数据库 schema 版本 {found} 高于当前应用支持的 {supported}")]
     SchemaTooNew { found: i64, supported: i64 },
 
@@ -65,6 +68,7 @@ impl CoreError {
             Self::Git(_) => "GIT_ERROR",
             Self::ApprovalRequired => "APPROVAL_REQUIRED",
             Self::Verification(_) => "VERIFICATION_ERROR",
+            Self::Claude(_) => "CLAUDE_INTEGRATION_ERROR",
             Self::SchemaTooNew { .. } => "SCHEMA_TOO_NEW",
             Self::InvalidMigration(_) => "MIGRATION_CONFIG_ERROR",
         }

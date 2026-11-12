@@ -1,23 +1,15 @@
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  Ban,
-  FileSearch,
-  History,
-  LoaderCircle,
-  Play,
-  Settings2,
-  ShieldCheck,
-  TerminalSquare,
-} from "lucide-react";
+import { Ban, FileSearch, History, LoaderCircle, Play, Settings2, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { VerificationBadge } from "@/components/status-badge";
-import { EvidenceDialog } from "@/features/verification/evidence-dialog";
+import { CommandBlock } from "@/features/verification/command-block";
+import { EvidenceSheet } from "@/features/verification/evidence-sheet";
 import { VerificationApprovalDialog } from "@/features/verification/verification-approval-dialog";
 import { VerificationConfigDialog } from "@/features/verification/verification-config-dialog";
-import { VerificationHistoryDialog } from "@/features/verification/verification-history-dialog";
+import { VerificationHistorySheet } from "@/features/verification/verification-history-sheet";
 import {
   useCancelVerification,
   useVerificationRun,
@@ -27,7 +19,8 @@ import { taskQueryKeys } from "@/features/tasks/queries";
 import { formatDateTime, formatDuration } from "@/lib/format";
 import type { CriterionView, Task } from "@/lib/domain";
 import { getErrorMessage } from "@/lib/ipc";
-import { EXECUTION_STATUS_META, formatCommand } from "@/lib/verification-display";
+import { EXECUTION_STATUS_META } from "@/lib/verification-display";
+import { cn } from "@/lib/utils";
 
 export function CriterionVerification({
   task,
@@ -92,23 +85,23 @@ export function CriterionVerification({
   };
 
   return (
-    <div className="mt-3 space-y-3 border-t pt-3">
+    <div className="mt-3 space-y-3 border-t border-line/60 pt-3">
       <div className="flex flex-wrap items-center gap-2">
         <VerificationBadge status={status} />
         {execution && ExecutionIcon ? (
-          <span className={`inline-flex items-center gap-1 text-xs ${execution.className}`}>
+          <span className={cn("inline-flex items-center gap-1 text-[11px]", execution.className)}>
             <ExecutionIcon
-              className={`size-3.5 ${running ? "animate-spin" : ""}`}
+              className={cn("size-3.5", running && "animate-spin")}
               aria-hidden="true"
             />
             {execution.label}
           </span>
         ) : null}
         {spec ? (
-          <span className="font-mono text-[11px] text-muted-foreground">配置 r{spec.revision}</span>
+          <span className="font-mono text-[10px] text-muted-foreground">配置 r{spec.revision}</span>
         ) : null}
         {latestRun ? (
-          <span className="text-xs text-muted-foreground">
+          <span className="text-[11px] text-muted-foreground">
             {formatDateTime(latestRun.startedAt)}
             {latestRun.exitCode !== null ? ` · 退出码 ${latestRun.exitCode}` : ""}
             {latestRun.durationMs !== null ? ` · ${formatDuration(latestRun.durationMs)}` : ""}
@@ -117,39 +110,30 @@ export function CriterionVerification({
       </div>
 
       {spec ? (
-        <div className="rounded-md border bg-surface-raised/40">
-          <div className="flex items-center gap-1.5 border-b px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
-            <TerminalSquare className="size-3" aria-hidden="true" />
-            验证命令
-          </div>
-          <pre className="overflow-x-auto whitespace-pre-wrap break-all px-3 py-2 font-mono text-xs leading-5">
-            {formatCommand(spec.executable, spec.args)}
-          </pre>
-          <p
-            className="truncate border-t px-3 py-1.5 font-mono text-[11px] text-muted-foreground"
-            title={spec.cwd}
-          >
-            cwd: {spec.cwd}
-          </p>
-        </div>
+        <CommandBlock
+          executable={spec.executable}
+          args={spec.args}
+          cwd={spec.cwd}
+          label="验证命令"
+        />
       ) : (
-        <p className="rounded-md border border-dashed px-3 py-2 text-xs leading-5 text-muted-foreground">
+        <p className="border-l-2 border-line-strong bg-surface-raised/40 px-3 py-2 text-[11px] leading-5 text-muted-foreground">
           尚未配置验证命令。配置后才能运行自动验收。
         </p>
       )}
 
       {verification.staleReason ? (
-        <p className="text-xs leading-5 text-verification-stale">
+        <p className="text-[11px] leading-5 text-verification-stale">
           过期原因：{verification.staleReason}
         </p>
       ) : verification.detail ? (
-        <p className="text-xs leading-5 text-muted-foreground">{verification.detail}</p>
+        <p className="text-[11px] leading-5 text-muted-foreground">{verification.detail}</p>
       ) : null}
 
       {running ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary/35 bg-primary/5 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2 border-l-2 border-primary bg-accent/35 px-3 py-2">
           <LoaderCircle className="size-4 animate-spin text-primary" aria-hidden="true" />
-          <span className="text-xs text-primary">验证正在后台运行，输出将在结束后写入证据。</span>
+          <span className="text-[11px] text-primary">验证在后台运行，结束后写入证据。</span>
           <Button
             type="button"
             size="sm"
@@ -165,16 +149,16 @@ export function CriterionVerification({
       ) : null}
 
       {task.status !== "awaiting_verification" && spec && !running ? (
-        <p className="text-xs leading-5 text-muted-foreground">
+        <p className="text-[11px] leading-5 text-muted-foreground">
           任务进入待验证状态后才能启动验证。
         </p>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-1">
         {canConfigure ? (
           <Button type="button" size="sm" variant="ghost" onClick={() => setConfigOpen(true)}>
             <Settings2 aria-hidden="true" />
-            {spec ? "编辑验证配置" : "配置验证"}
+            {spec ? "编辑配置" : "配置验证"}
           </Button>
         ) : null}
         {canRun ? (
@@ -199,7 +183,7 @@ export function CriterionVerification({
           验证历史
         </Button>
         {verification.validPassRunId ? (
-          <span className="ml-auto inline-flex items-center gap-1 text-xs text-verification-pass">
+          <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-verification-pass">
             <ShieldCheck className="size-3.5" aria-hidden="true" />
             当前有效 PASS
           </span>
@@ -226,7 +210,7 @@ export function CriterionVerification({
         />
       ) : null}
 
-      <VerificationHistoryDialog
+      <VerificationHistorySheet
         open={historyOpen}
         onOpenChange={setHistoryOpen}
         taskId={task.id}
@@ -237,7 +221,7 @@ export function CriterionVerification({
         }}
       />
 
-      <EvidenceDialog
+      <EvidenceSheet
         open={Boolean(evidenceId)}
         onOpenChange={(open) => {
           if (!open) {

@@ -25,10 +25,10 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
   render() {
     if (this.state.error) {
       return (
-        <main className="grid min-h-screen place-items-center bg-background p-6">
+        <main className="grid min-h-screen place-items-center bg-workspace p-6">
           <section
             role="alert"
-            className="w-full max-w-lg rounded-xl border bg-card p-8 text-card-foreground shadow-sm"
+            className="w-full max-w-lg rounded-lg border border-line bg-card p-6 text-card-foreground"
           >
             <div className="flex items-center gap-3 text-destructive">
               <AlertTriangle className="size-5" aria-hidden="true" />

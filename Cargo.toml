@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["apps/desktop/src-tauri", "crates/xushu-core"]
+members = [
+    "apps/desktop/src-tauri",
+    "crates/xushu-core",
+    "crates/xushu-hook",
+    "crates/xushu-hook-protocol",
+]
 
 [workspace.package]
 version = "0.1.0"

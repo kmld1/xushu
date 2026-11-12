@@ -1,10 +1,13 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import type {
   AcceptanceCriterion,
+  ClaudeActivitySnapshot,
+  ClaudeHookPreview,
+  ClaudeIntegrationStatus,
   Project,
   ProjectGitStatus,
   Task,
@@ -26,7 +29,7 @@ const appInfo = {
   name: "序枢 XUSHU",
   version: "0.1.0",
   tauriVersion: "2.12.5",
-  phase: "Phase 3",
+  phase: "Phase 4",
   platform: "windows",
 };
 
@@ -36,7 +39,7 @@ const health = {
   foreignKeysEnabled: true,
   foreignKeyViolations: false,
   journalMode: "wal",
-  schemaVersion: 3,
+  schemaVersion: 4,
   recordCount: 0,
   databaseFile: "xushu.db",
 };
@@ -109,6 +112,64 @@ const taskDetail: TaskDetail = {
   },
 };
 
+const claudeStatus: ClaudeIntegrationStatus = {
+  projectId: project.id,
+  projectName: project.name,
+  projectArchived: false,
+  desiredEnabled: false,
+  hasRecord: false,
+  installState: "not_configured",
+  stateDetail: "尚未安装 Hooks",
+  settingsFile: ".claude/settings.local.json",
+  settingsExists: false,
+  managedHookCount: 0,
+  expectedHookCount: 6,
+  otherHookGroupCount: 0,
+  hookVersion: null,
+  installedAt: null,
+  receiverChanged: false,
+  hookBinaryAvailable: true,
+  inboxAvailable: true,
+  pendingEventCount: 0,
+  lastEventAt: null,
+  lastEventType: null,
+  lastImportAt: null,
+  uninstalledAt: null,
+  lastErrorCode: null,
+  lastErrorAt: null,
+  eventCount: 0,
+  sessionCount: 0,
+  runningToolCount: 0,
+  retentionDays: 30,
+  maxEvents: 5000,
+};
+
+const claudeActivity: ClaudeActivitySnapshot = {
+  projectId: project.id,
+  generatedAt: "2026-11-06T00:00:00.000Z",
+  pendingEventCount: 0,
+  sessions: [],
+  events: [],
+  toolCalls: [],
+};
+
+const claudePreview: ClaudeHookPreview = {
+  projectId: project.id,
+  projectName: project.name,
+  settingsFile: ".claude/settings.local.json",
+  settingsExists: false,
+  willCreateFile: true,
+  managedEntries: [],
+  managedCountBefore: 0,
+  otherHookGroupCount: 0,
+  backupWillBeCreated: false,
+  receiverAvailable: true,
+  inboxAvailable: true,
+  previewToken: "preview-token",
+  warnings: [],
+  blockedReason: null,
+};
+
 const emptySummary: WorkspaceSummary = {
   projectCount: 0,
   archivedProjectCount: 0,
@@ -142,9 +203,13 @@ const populatedSummary: WorkspaceSummary = {
 function mockBackend({
   withProject = false,
   failHealth = false,
+  tasks = [task],
+  details = [taskDetail],
 }: {
   withProject?: boolean;
   failHealth?: boolean;
+  tasks?: Task[];
+  details?: TaskDetail[];
 } = {}) {
   invokeMock.mockImplementation(async (command, args) => {
     switch (command) {
@@ -171,16 +236,32 @@ function mockBackend({
         if (filter.projectId && filter.projectId !== project.id) {
           return [];
         }
-        return [task];
+        return tasks;
       }
       case "get_task":
-        return taskDetail;
+        return details.find((detail) => detail.task.id === args?.id) ?? taskDetail;
       case "list_probe_records":
         return [];
       case "list_verification_queue":
         return [];
       case "list_verification_runs":
         return [];
+      case "get_claude_integration":
+        return claudeStatus;
+      case "get_claude_activity":
+        return claudeActivity;
+      case "preview_claude_hooks":
+        return claudePreview;
+      case "refresh_claude_events":
+        return {
+          projectId: project.id,
+          imported: 0,
+          duplicates: 0,
+          rejected: 0,
+          ignored: 0,
+          remaining: 0,
+          lastErrorCode: null,
+        };
       case "get_probe_record":
         throw { code: "NOT_FOUND", message: "未找到指定记录" };
       case "create_probe_record":
@@ -201,14 +282,18 @@ describe("XUSHU desktop shell", () => {
     mockBackend();
   });
 
-  it("renders an honest empty workspace with real health data", async () => {
+  it("renders an honest empty workspace and real health data", async () => {
+    const user = userEvent.setup();
     render(<App />);
 
     expect(await screen.findByText("还没有可管理的项目")).toBeInTheDocument();
-    expect(await screen.findByText("系统健康")).toBeInTheDocument();
-    expect(await screen.findByText("v3")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导入第一个项目" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "项目" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "任务" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("link", { name: "诊断" }));
+    expect(await screen.findByText("系统")).toBeInTheDocument();
+    expect(await screen.findByText("v4")).toBeInTheDocument();
   });
 
   it("shows real workspace counts and the current project", async () => {
@@ -218,8 +303,12 @@ describe("XUSHU desktop shell", () => {
     expect(await screen.findAllByText("当前项目")).not.toHaveLength(0);
     expect(await screen.findAllByText("示例项目")).not.toHaveLength(0);
     expect(await screen.findAllByText("实现项目导入")).not.toHaveLength(0);
-    expect(await screen.findByText("需要关注")).toBeInTheDocument();
-    expect(await screen.findByText("没有阻塞任务。")).toBeInTheDocument();
+    expect(await screen.findByText("需要处理")).toBeInTheDocument();
+    expect(await screen.findByText("最近验证")).toBeInTheDocument();
+    expect(await screen.findByText("当前项目最近任务还没有验证运行记录。")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "窗口控制" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "最大化窗口" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "关闭窗口" })).toBeInTheDocument();
   });
 
   it("opens the projects page and validates the import dialog", async () => {
@@ -235,6 +324,102 @@ describe("XUSHU desktop shell", () => {
     await user.click(screen.getByRole("button", { name: "检查并导入" }));
 
     expect(await screen.findByText("请输入 Git 项目路径")).toBeInTheDocument();
+  });
+
+  it("keeps the focus task actionable without repeating it in the attention list", async () => {
+    mockBackend({ withProject: true });
+    render(<App />);
+
+    const focus = await screen.findByRole("region", { name: "下一步" });
+    expect(within(focus).getByText(task.title)).toBeInTheDocument();
+    expect(await within(focus).findByText(taskDetail.completion.blockers[0])).toBeInTheDocument();
+    expect(within(focus).getByRole("link", { name: "进入验收" })).toHaveAttribute(
+      "href",
+      `#/verification?task=${task.id}`,
+    );
+    const attention = screen.getByRole("region", { name: "需要处理" });
+    expect(within(attention).queryByText(task.title)).not.toBeInTheDocument();
+    expect(within(attention).getByText("待处理任务已列在「下一步」。")).toBeInTheDocument();
+    expect(within(attention).queryByText("没有阻塞或待验收任务。")).not.toBeInTheDocument();
+  });
+
+  it("preserves other attention tasks and their full blocking reasons", async () => {
+    const blocked: Task = {
+      ...task,
+      id: "55555555-5555-4555-8555-555555555555",
+      title: "等待构建环境恢复",
+      status: "blocked",
+      blockReason: "缺少本机编译工具，需要安装后重新验证。",
+    };
+    mockBackend({ withProject: true, tasks: [task, blocked] });
+    render(<App />);
+
+    const focus = await screen.findByRole("region", { name: "下一步" });
+    expect(within(focus).getByText(blocked.blockReason!)).toBeInTheDocument();
+    const attention = screen.getByRole("region", { name: "需要处理" });
+    expect(within(attention).getByRole("link", { name: task.title })).toHaveAttribute(
+      "href",
+      `#/tasks/${task.id}`,
+    );
+    expect(within(attention).queryByText(blocked.title)).not.toBeInTheDocument();
+    expect(within(attention).getByText("另 1 项 · 焦点任务见上方")).toBeInTheDocument();
+  });
+
+  it("shows verification result, exit code and duration with the corresponding task entry", async () => {
+    const details: TaskDetail[] = [
+      {
+        ...taskDetail,
+        criteria: [
+          {
+            ...taskDetail.criteria[0],
+            criterion: { ...criterion, kind: "auto" },
+            verification: {
+              status: "fail",
+              spec: null,
+              latestCheck: null,
+              validPassRunId: null,
+              staleReason: null,
+              detail: "退出码不为 0",
+              latestRun: {
+                id: "run-failed",
+                taskId: task.id,
+                criterionId: criterion.id,
+                criterionDescription: "检查项目导入",
+                executable: "cargo",
+                args: ["test"],
+                cwd: project.rootPath,
+                executionStatus: "completed",
+                result: "fail",
+                reason: "退出码不为 0",
+                evidenceId: "evidence-failed",
+                specRevision: 1,
+                taskRevision: 3,
+                criterionRevision: 1,
+                startedAt: task.updatedAt,
+                finishedAt: task.updatedAt,
+                exitCode: 1,
+                durationMs: 1250,
+                stdoutTruncated: false,
+                stderrTruncated: false,
+                sensitiveFlags: [],
+                createdAt: task.updatedAt,
+              },
+            },
+          },
+        ],
+      },
+    ];
+    mockBackend({ withProject: true, details });
+    render(<App />);
+
+    const activity = await screen.findByRole("region", { name: "最近验证" });
+    expect(await within(activity).findByText("失败")).toBeInTheDocument();
+    expect(within(activity).getByText("退出码 1")).toBeInTheDocument();
+    expect(within(activity).getByText("1.3 s")).toBeInTheDocument();
+    expect(within(activity).getByRole("link", { name: criterion.description })).toHaveAttribute(
+      "href",
+      `#/tasks/${task.id}`,
+    );
   });
 
   it("renders task detail with state track and a blocked completion gate", async () => {
@@ -262,7 +447,9 @@ describe("XUSHU desktop shell", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "示例项目" })).toBeInTheDocument();
-    expect(await screen.findByText("Git 状态")).toBeInTheDocument();
+    expect(await screen.findByText("仓库")).toBeInTheDocument();
+    expect(await screen.findByText("Claude Code 接入")).toBeInTheDocument();
+    expect(await screen.findByText("未配置")).toBeInTheDocument();
     expect(await screen.findByText("项目任务")).toBeInTheDocument();
     expect(await screen.findByText("实现项目导入")).toBeInTheDocument();
   });
@@ -292,8 +479,8 @@ describe("XUSHU desktop shell", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("link", { name: "诊断" }));
-    expect(await screen.findByRole("heading", { name: "本地数据与系统健康" })).toBeInTheDocument();
-    expect(await screen.findByText("持久化探针不是业务数据")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "诊断" })).toBeInTheDocument();
+    expect(await screen.findByText(/持久化探针不是业务数据/)).toBeInTheDocument();
     expect(await screen.findByText("尚无测试记录")).toBeInTheDocument();
   });
 
@@ -314,8 +501,10 @@ describe("XUSHU desktop shell", () => {
 
   it("shows a readable health error without fake data", async () => {
     mockBackend({ failHealth: true });
+    const user = userEvent.setup();
     render(<App />);
 
+    await user.click(await screen.findByRole("link", { name: "诊断" }));
     expect(
       await screen.findByText("无法读取健康状态", undefined, { timeout: 3_000 }),
     ).toBeInTheDocument();

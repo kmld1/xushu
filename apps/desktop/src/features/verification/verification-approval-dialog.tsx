@@ -1,4 +1,4 @@
-import { CircleAlert, Play, ShieldCheck, TerminalSquare } from "lucide-react";
+import { CircleAlert, Play, ShieldAlert } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -13,11 +13,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LoadingState } from "@/components/loading-state";
+import { CommandBlock } from "@/features/verification/command-block";
 import { usePreviewVerification, useStartVerification } from "@/features/verification/queries";
 import { formatBytes, formatDuration } from "@/lib/format";
 import type { AcceptanceCriterion, Task, VerificationRun } from "@/lib/domain";
 import { getErrorMessage } from "@/lib/ipc";
-import { describeSuccessRule, formatCommand } from "@/lib/verification-display";
+import { describeSuccessRule } from "@/lib/verification-display";
 
 export function VerificationApprovalDialog({
   open,
@@ -81,43 +82,36 @@ export function VerificationApprovalDialog({
           </Alert>
         ) : (
           <div className="space-y-4">
-            <div className="rounded-lg border bg-surface-raised/40">
-              <div className="flex items-center gap-2 border-b px-4 py-2.5 text-xs font-medium text-muted-foreground">
-                <TerminalSquare className="size-3.5" aria-hidden="true" />
-                将要执行的命令
-              </div>
-              <pre className="overflow-x-auto whitespace-pre-wrap break-all p-4 font-mono text-xs leading-6">
-                {formatCommand(preview.data.executable, preview.data.args)}
-              </pre>
-            </div>
+            <CommandBlock
+              executable={preview.data.executable}
+              args={preview.data.args}
+              cwd={preview.data.cwd}
+              label="将要执行"
+            />
 
-            <dl className="grid gap-3 text-sm sm:grid-cols-2">
-              <div className="space-y-1">
-                <dt className="text-xs text-muted-foreground">工作目录</dt>
-                <dd className="break-all font-mono text-xs">{preview.data.cwd}</dd>
-              </div>
-              <div className="space-y-1">
-                <dt className="text-xs text-muted-foreground">解析到的程序</dt>
-                <dd className="break-all font-mono text-xs">
-                  {preview.data.resolvedExecutable ?? "未解析到（运行将记录为未运行）"}
+            <dl className="grid gap-x-6 gap-y-2 text-xs sm:grid-cols-2">
+              <div className="flex items-start justify-between gap-3 border-b border-line/60 pb-2">
+                <dt className="text-muted-foreground">解析到的程序</dt>
+                <dd className="max-w-[65%] break-all text-right font-mono text-[11px]">
+                  {preview.data.resolvedExecutable ?? "未解析到（将记录为未运行）"}
                 </dd>
               </div>
-              <div className="space-y-1">
-                <dt className="text-xs text-muted-foreground">超时</dt>
+              <div className="flex items-center justify-between gap-3 border-b border-line/60 pb-2">
+                <dt className="text-muted-foreground">超时</dt>
                 <dd>{formatDuration(preview.data.timeoutSeconds * 1_000)}</dd>
               </div>
-              <div className="space-y-1">
-                <dt className="text-xs text-muted-foreground">输出上限</dt>
-                <dd>{formatBytes(preview.data.outputLimitBytes)} / 每个输出流</dd>
+              <div className="flex items-center justify-between gap-3 border-b border-line/60 pb-2">
+                <dt className="text-muted-foreground">输出上限</dt>
+                <dd>{formatBytes(preview.data.outputLimitBytes)} / 流</dd>
               </div>
-              <div className="space-y-1 sm:col-span-2">
-                <dt className="text-xs text-muted-foreground">成功规则</dt>
+              <div className="flex items-center justify-between gap-3 border-b border-line/60 pb-2">
+                <dt className="text-muted-foreground">成功规则</dt>
                 <dd>{describeSuccessRule(preview.data.successRule)}</dd>
               </div>
             </dl>
 
             <Alert variant="warning">
-              <ShieldCheck className="mt-0.5 size-4" aria-hidden="true" />
+              <ShieldAlert className="mt-0.5 size-4" aria-hidden="true" />
               <AlertTitle>执行前确认</AlertTitle>
               <AlertDescription>
                 <ul className="list-disc space-y-1 pl-4">
@@ -128,10 +122,10 @@ export function VerificationApprovalDialog({
               </AlertDescription>
             </Alert>
 
-            <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
+            <label className="flex items-start gap-2 border-t border-line/60 pt-3 text-xs leading-5">
               <input
                 type="checkbox"
-                className="mt-0.5 size-4 accent-primary"
+                className="mt-0.5 size-3.5 accent-primary"
                 checked={approved}
                 onChange={(event) => setApproved(event.target.checked)}
               />

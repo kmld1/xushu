@@ -8,9 +8,32 @@ import {
 } from "@/lib/task-display";
 import { cn } from "@/lib/utils";
 
-export function StatusBadge({ status, className }: { status: TaskStatus; className?: string }) {
+export function StatusBadge({
+  status,
+  className,
+  appearance = "badge",
+}: {
+  status: TaskStatus;
+  className?: string;
+  appearance?: "badge" | "inline";
+}) {
   const meta = TASK_STATUS_META[status];
   const Icon = meta.icon;
+
+  if (appearance === "inline") {
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 whitespace-nowrap text-xs",
+          meta.textClassName,
+          className,
+        )}
+      >
+        <Icon className="size-3 shrink-0" aria-hidden="true" />
+        {meta.label}
+      </span>
+    );
+  }
 
   return (
     <Badge variant="outline" className={cn("gap-1 border", meta.className, className)}>

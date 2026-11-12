@@ -17,7 +17,7 @@ export function ThemeControl() {
     <div
       role="group"
       aria-label="主题设置"
-      className="inline-flex items-center gap-1 rounded-lg border bg-card p-1"
+      className="inline-flex items-center gap-0.5 rounded-md p-0.5"
     >
       {themeOptions.map((option) => {
         const Icon = option.icon;
@@ -31,13 +31,13 @@ export function ThemeControl() {
             title={`${option.label}主题`}
             onClick={() => setMode(option.mode)}
             className={cn(
-              "inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors",
-              "hover:bg-accent hover:text-accent-foreground",
+              "inline-flex size-7 items-center justify-center rounded-sm text-muted-foreground transition-colors",
+              "hover:bg-hover hover:text-foreground",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              active && "bg-accent text-accent-foreground",
+              active && "bg-workspace text-foreground ring-1 ring-line/80",
             )}
           >
-            <Icon className="size-4" aria-hidden="true" />
+            <Icon className="size-3.5" aria-hidden="true" />
             <span className="sr-only">{option.label}</span>
           </button>
         );

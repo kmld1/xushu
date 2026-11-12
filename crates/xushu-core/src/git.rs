@@ -197,7 +197,7 @@ fn read_limited(mut pipe: impl Read, max_bytes: usize) -> (Vec<u8>, u64, bool) {
     (kept, total, truncated)
 }
 
-fn normalize_display_path(path: PathBuf) -> PathBuf {
+pub(crate) fn normalize_display_path(path: PathBuf) -> PathBuf {
     let text = path.to_string_lossy();
     if let Some(rest) = text.strip_prefix("\\\\?\\") {
         if !rest.starts_with("UNC\\") {

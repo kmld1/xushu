@@ -1,14 +1,11 @@
-import { FolderGit2, FolderPlus, Star } from "lucide-react";
+import { ArrowRight, FolderGit2, FolderPlus } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { LoadingState } from "@/components/loading-state";
-import { PageHeader } from "@/components/page-header";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ImportProjectDialog } from "@/features/projects/import-project-dialog";
 import { ProjectActionsMenu } from "@/features/projects/project-actions-menu";
@@ -34,37 +31,44 @@ function ProjectRow({
   return (
     <li
       className={cn(
-        "flex items-start gap-3 rounded-lg border bg-card p-4",
-        isCurrent && "border-l-2 border-l-primary",
-        archived && "opacity-80",
+        "group flex items-center gap-3 py-3 first:pt-2 last:pb-2",
+        archived && "opacity-70",
       )}
     >
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
+          {isCurrent ? (
+            <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />
+          ) : null}
           <Link
             to={`/projects/${project.id}`}
-            className="truncate text-sm font-semibold underline-offset-4 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="truncate text-[13px] font-semibold underline-offset-4 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            title={project.name}
           >
             {project.name}
           </Link>
-          {isCurrent ? (
-            <Badge variant="secondary" className="gap-1">
-              <Star className="size-3" aria-hidden="true" />
-              当前
-            </Badge>
-          ) : null}
-          {archived ? <Badge variant="secondary">已归档</Badge> : null}
+          {isCurrent ? <span className="text-[10px] font-medium text-primary">当前</span> : null}
+          {archived ? <span className="text-[10px] text-muted-foreground">已归档</span> : null}
         </div>
         <p
-          className="mt-1 truncate font-mono text-[11px] text-muted-foreground"
+          className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground"
           title={project.rootPath}
         >
           {project.rootPath}
         </p>
-        <div className="mt-2">
+        <div className="mt-1">
           <ProjectGitSummary projectId={project.id} compact />
         </div>
       </div>
+
+      <Link
+        to={`/projects/${project.id}`}
+        className="inline-flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        aria-label={`打开项目 ${project.name}`}
+      >
+        打开
+        <ArrowRight className="size-3" aria-hidden="true" />
+      </Link>
       <ProjectActionsMenu project={project} isCurrent={isCurrent} onSetCurrent={onSetCurrent} />
     </li>
   );
@@ -80,17 +84,8 @@ export function ProjectsPage() {
   const archivedProjects = (projects.data ?? []).filter((project) => project.archivedAt);
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="项目"
-        description="管理已导入的本地 Git 项目。XUSHU 只读 Git，不修改仓库文件、分支或历史。"
-        actions={
-          <Button type="button" size="sm" onClick={() => setImportOpen(true)}>
-            <FolderPlus aria-hidden="true" />
-            导入项目
-          </Button>
-        }
-      />
+    <div className="space-y-5">
+      <h1 className="sr-only">项目</h1>
 
       {projects.isPending ? (
         <LoadingState rows={4} />
@@ -102,26 +97,32 @@ export function ProjectsPage() {
         />
       ) : (
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList aria-label="项目状态筛选">
-            <TabsTrigger value="active">进行中 {activeProjects.length}</TabsTrigger>
-            <TabsTrigger value="archived">已归档 {archivedProjects.length}</TabsTrigger>
-          </TabsList>
+          <div className="flex items-center justify-between gap-3 border-b border-line/80">
+            <TabsList aria-label="项目状态筛选" className="w-auto flex-1 border-b-0">
+              <TabsTrigger value="active">进行中 {activeProjects.length}</TabsTrigger>
+              <TabsTrigger value="archived">已归档 {archivedProjects.length}</TabsTrigger>
+            </TabsList>
+            <Button type="button" size="sm" onClick={() => setImportOpen(true)}>
+              <FolderPlus aria-hidden="true" />
+              导入项目
+            </Button>
+          </div>
 
           <TabsContent value="active">
             {activeProjects.length === 0 ? (
               <EmptyState
                 icon={FolderGit2}
                 title="还没有进行中的项目"
-                description="导入一个本地 Git 工作树，开始创建任务并跟踪验收状态。"
+                description="导入一个本地 Git 工作树，开始定义任务与验收条件。"
                 action={
-                  <Button type="button" onClick={() => setImportOpen(true)}>
+                  <Button type="button" size="sm" onClick={() => setImportOpen(true)}>
                     <FolderPlus aria-hidden="true" />
                     导入项目
                   </Button>
                 }
               />
             ) : (
-              <ul className="space-y-3">
+              <ul className="divide-y divide-line/70 border-b border-line/70">
                 {activeProjects.map((project) => (
                   <ProjectRow
                     key={project.id}
@@ -136,13 +137,11 @@ export function ProjectsPage() {
 
           <TabsContent value="archived">
             {archivedProjects.length === 0 ? (
-              <Card>
-                <CardContent className="p-6 text-sm text-muted-foreground">
-                  没有已归档项目。归档项目会保留磁盘文件与任务数据，可随时恢复。
-                </CardContent>
-              </Card>
+              <p className="border-b border-line/70 py-6 text-xs text-muted-foreground">
+                没有已归档项目。归档会保留磁盘文件与任务数据，可随时恢复。
+              </p>
             ) : (
-              <ul className="space-y-3">
+              <ul className="divide-y divide-line/70 border-b border-line/70">
                 {archivedProjects.map((project) => (
                   <ProjectRow
                     key={project.id}

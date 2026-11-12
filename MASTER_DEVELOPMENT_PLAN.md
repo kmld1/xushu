@@ -319,6 +319,13 @@ xushu-hook 本地 CLI
 
 **验收门禁：** 在 Windows Claude Code 中真实触发至少开始/工具/结束类可用事件并验证入库；重复投递不重复记账；关闭/卸载后无新采集；Hook 出错不阻断 Claude Code。
 
+> **Phase 4 实施状态（2026-11-12）**。Windows 六种真实 Hooks 联调、已测功能与当前 E2E 隔离通过。整体验收 **PENDING**。 [Phase 4.3 安全可靠性收尾](docs/phases/PHASE_4_3_SECURITY_CLOSEOUT.md)
+>
+> - 已完成：`xushu-hook` CLI + 最小事件协议、项目级 `.claude/settings.local.json` 授权安装/停用/卸载、备份与原子写入、配置异常/重定向/外部修改检测、离线 spool 导入、并发/重复/缺失事件处理、迁移 4 数据模型、受限 IPC、项目详情接入与活动 UI。
+> - 已验证：Rust workspace 110 项、前端 54 项、真实 Claude Code 六事件入库与去重、正常停用和卸载、真实数据 UI 交互、E2E 正常/失败/异常退出隔离。
+> - Phase 4.3 回归覆盖故障下撤销采集、项目根目录重定向、外部设置编辑和迟到事件。新构建的真实 Claude Code 会话及人工视觉仍待手动复验。
+> - 未完成：生产安装包 sidecar 打包与升级路径验证（Phase 7）；macOS 与旧版 Claude Code 未验证；人工视觉复核仍为 `VISUAL_REVIEW_PENDING`。
+
 ### Phase 5 — 决策记忆与断点恢复
 
 **工作：** 追加式决策、事实摘要（优先确定性模板）、恢复卡（Markdown 导出）、任务状态/阻塞/证据引用汇总；重启恢复。

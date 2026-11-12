@@ -29,6 +29,16 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0003_verification_engine",
         sql: include_str!("../../migrations/0003_verification_engine.sql"),
     },
+    Migration {
+        version: 4,
+        name: "0004_claude_hooks",
+        sql: include_str!("../../migrations/0004_claude_hooks.sql"),
+    },
+    Migration {
+        version: 5,
+        name: "0005_claude_capture_boundary",
+        sql: include_str!("../../migrations/0005_claude_capture_boundary.sql"),
+    },
 ];
 
 /// 一次迁移执行的结果。

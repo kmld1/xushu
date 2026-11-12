@@ -1,4 +1,13 @@
-import { Archive, ArchiveRestore, ArrowLeft, FolderGit2, Pencil, ShieldCheck } from "lucide-react";
+import {
+  AlertCircle,
+  Archive,
+  ArchiveRestore,
+  ArrowLeft,
+  CheckCircle2,
+  FolderGit2,
+  Pencil,
+  ShieldCheck,
+} from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
@@ -7,12 +16,11 @@ import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { ErrorState } from "@/components/error-state";
 import { LoadingState } from "@/components/loading-state";
 import { PageHeader } from "@/components/page-header";
+import { Section, SectionHeader } from "@/components/section";
 import { StateSpine } from "@/components/state-spine";
 import { StateTrack } from "@/components/state-track";
 import { PriorityBadge, StatusBadge } from "@/components/status-badge";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CriterionList } from "@/features/tasks/criterion-list";
 import { EditTaskDialog } from "@/features/tasks/edit-task-dialog";
 import { useArchiveTask, useRestoreTask, useTaskDetail } from "@/features/tasks/queries";
@@ -20,6 +28,7 @@ import { TransitionPanel } from "@/features/tasks/transition-panel";
 import { useProject } from "@/features/projects/queries";
 import { formatDateTime } from "@/lib/format";
 import { getErrorMessage } from "@/lib/ipc";
+import { cn } from "@/lib/utils";
 
 function NextStep({
   status,
@@ -49,7 +58,7 @@ function NextStep({
                 ? "如仍需推进，请使用“重新开启任务”并填写原因。"
                 : "任务已完成。如需返工，请创建新任务。";
 
-  return <p className="text-sm leading-6 text-muted-foreground">{text}</p>;
+  return <p className="text-[11px] leading-5 text-muted-foreground">{text}</p>;
 }
 
 export function TaskDetailPage() {
@@ -64,8 +73,8 @@ export function TaskDetailPage() {
 
   if (detail.isPending) {
     return (
-      <div className="space-y-6">
-        <PageHeader title="任务详情" description="加载任务与验收条件…" />
+      <div className="space-y-5">
+        <PageHeader title="任务详情" />
         <LoadingState rows={5} />
       </div>
     );
@@ -73,8 +82,8 @@ export function TaskDetailPage() {
 
   if (detail.isError || !detail.data) {
     return (
-      <div className="space-y-6">
-        <Button asChild variant="ghost" size="sm">
+      <div className="space-y-5">
+        <Button asChild variant="ghost" size="sm" className="-ml-2">
           <Link to="/tasks">
             <ArrowLeft aria-hidden="true" />
             返回任务列表
@@ -101,7 +110,7 @@ export function TaskDetailPage() {
         expectedRevision: task.revision,
       });
       toast.success("任务已归档", {
-        description: "任务数据保留，可随时恢复。",
+        description: "任务数据与验收历史保留，可随时恢复。",
       });
       setArchiveOpen(false);
     } catch (error) {
@@ -125,7 +134,7 @@ export function TaskDetailPage() {
   return (
     <div className="space-y-5">
       <div>
-        <Button asChild variant="ghost" size="sm" className="-ml-2 mb-2">
+        <Button asChild variant="ghost" size="sm" className="-ml-2 mb-1">
           <Link to="/tasks">
             <ArrowLeft aria-hidden="true" />
             返回任务列表
@@ -133,13 +142,38 @@ export function TaskDetailPage() {
         </Button>
         <PageHeader
           title={task.title}
-          description={`${project.data?.name ?? "未知项目"} · 修订 ${task.revision} · 更新于 ${formatDateTime(task.updatedAt)}`}
+          meta={
+            <>
+              <Link
+                to={`/projects/${task.projectId}`}
+                className="inline-flex items-center gap-1 underline-offset-4 hover:text-primary hover:underline"
+              >
+                <FolderGit2 className="size-3" aria-hidden="true" />
+                {project.data?.name ?? "未知项目"}
+              </Link>
+              <span aria-hidden="true">·</span>
+              <StatusBadge status={task.status} />
+              <PriorityBadge priority={task.priority} />
+              <span className="font-mono text-[10px]">r{task.revision}</span>
+              <span>更新于 {formatDateTime(task.updatedAt)}</span>
+              {archived ? <span className="text-warning">已归档</span> : null}
+              {projectArchived ? <span className="text-warning">项目已归档</span> : null}
+            </>
+          }
           actions={
             <>
+              {task.status === "awaiting_verification" && !archived && !projectArchived ? (
+                <Button asChild size="sm">
+                  <Link to={`/verification?task=${task.id}`}>
+                    <ShieldCheck aria-hidden="true" />
+                    进入验收
+                  </Link>
+                </Button>
+              ) : null}
               {!archived && !terminal ? (
                 <Button type="button" variant="outline" size="sm" onClick={() => setEditOpen(true)}>
                   <Pencil aria-hidden="true" />
-                  编辑任务
+                  编辑
                 </Button>
               ) : null}
               {archived ? (
@@ -150,176 +184,130 @@ export function TaskDetailPage() {
                   onClick={() => setRestoreOpen(true)}
                 >
                   <ArchiveRestore aria-hidden="true" />
-                  恢复任务
+                  恢复
                 </Button>
               ) : (
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
                   onClick={() => setArchiveOpen(true)}
                 >
                   <Archive aria-hidden="true" />
-                  归档任务
+                  归档
                 </Button>
               )}
             </>
           }
         />
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <StatusBadge status={task.status} />
-          <PriorityBadge priority={task.priority} />
-          <Button asChild variant="link" size="sm" className="h-auto p-0">
-            <Link to={`/projects/${task.projectId}`}>
-              <FolderGit2 aria-hidden="true" />
-              打开项目
-            </Link>
-          </Button>
-          {archived ? <span className="text-xs text-muted-foreground">已归档</span> : null}
-          {projectArchived ? (
-            <span className="text-xs text-muted-foreground">所属项目已归档</span>
-          ) : null}
-        </div>
       </div>
 
-      <Card>
-        <CardContent className="p-4">
-          <StateTrack status={task.status} />
-        </CardContent>
-      </Card>
+      <div className="border-y border-line/70 py-3">
+        <StateTrack status={task.status} />
+      </div>
 
-      <div className="grid items-start gap-5 xl:grid-cols-[1.55fr_1fr]">
-        <div className="space-y-5">
-          <Card>
-            <CardHeader>
-              <CardTitle>目标</CardTitle>
-              <CardDescription>任务的执行范围与背景。</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {task.description ? (
-                <p className="whitespace-pre-wrap break-words text-sm leading-6">
-                  {task.description}
-                </p>
-              ) : (
-                <p className="text-sm text-muted-foreground">尚未填写任务描述。</p>
-              )}
-            </CardContent>
-          </Card>
+      <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(280px,0.9fr)]">
+        <div className="min-w-0 space-y-6">
+          <Section>
+            <SectionHeader title="目标" />
+            {task.description ? (
+              <p className="whitespace-pre-wrap break-words text-sm leading-6">
+                {task.description}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">尚未填写任务描述。</p>
+            )}
+          </Section>
 
-          <Card>
-            <CardContent className="p-5">
-              <CriterionList detail={detail.data} readOnly={criteriaReadOnly} />
-            </CardContent>
-          </Card>
+          <div className="border-t border-line/70 pt-5">
+            <CriterionList detail={detail.data} readOnly={criteriaReadOnly} />
+          </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>状态历史</CardTitle>
-              <CardDescription>状态变化、原因与对应任务修订。</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <StateSpine transitions={detail.data.transitions} />
-            </CardContent>
-          </Card>
+          <Section className="border-t border-line/70 pt-5">
+            <SectionHeader title="状态历史" meta={`${detail.data.transitions.length} 条`} />
+            <StateSpine transitions={detail.data.transitions} />
+          </Section>
         </div>
 
-        <div className="space-y-5">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ShieldCheck className="size-4 text-primary" aria-hidden="true" />
-                完成门禁
-              </CardTitle>
-              <CardDescription>只有必需验收条件全部满足时才允许完成。</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between gap-3 text-sm">
-                <span className="text-muted-foreground">必需条件</span>
-                <span className="font-mono">
-                  {detail.data.completion.satisfiedRequiredCount}/
-                  {detail.data.completion.requiredCount}
+        <aside className="min-w-0 space-y-6 xl:border-l xl:border-line/70 xl:pl-6">
+          <Section>
+            <SectionHeader
+              title="完成门禁"
+              meta={`${detail.data.completion.satisfiedRequiredCount}/${detail.data.completion.requiredCount} 必需条件`}
+            />
+            <div
+              className={cn(
+                "border-l-2 px-4 py-3",
+                detail.data.completion.canComplete
+                  ? "border-success bg-success/5"
+                  : "border-warning bg-warning/5",
+              )}
+            >
+              <div className="flex items-center gap-2 text-[13px] font-medium">
+                {detail.data.completion.canComplete ? (
+                  <CheckCircle2 className="size-4 text-success" aria-hidden="true" />
+                ) : (
+                  <AlertCircle className="size-4 text-warning" aria-hidden="true" />
+                )}
+                <span
+                  className={detail.data.completion.canComplete ? "text-success" : "text-warning"}
+                >
+                  {detail.data.completion.canComplete ? "满足完成条件" : "尚不能完成"}
                 </span>
               </div>
-
               {detail.data.completion.canComplete ? (
-                <Alert variant="success">
-                  <ShieldCheck className="mt-0.5 size-4" aria-hidden="true" />
-                  <AlertTitle>满足完成条件</AlertTitle>
-                  <AlertDescription>
-                    {task.status === "awaiting_verification"
-                      ? "可以标记完成。"
-                      : "所有门禁已满足，但任务仍需按状态机推进。"}
-                  </AlertDescription>
-                </Alert>
+                <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                  {task.status === "awaiting_verification"
+                    ? "可以标记完成。"
+                    : "门禁已满足，但仍需按状态机推进。"}
+                </p>
               ) : (
-                <Alert variant="warning">
-                  <ShieldCheck className="mt-0.5 size-4" aria-hidden="true" />
-                  <AlertTitle>尚不能完成</AlertTitle>
-                  <AlertDescription>
-                    <ul className="list-disc space-y-1 pl-4">
-                      {detail.data.completion.blockers.map((blocker) => (
-                        <li key={blocker}>{blocker}</li>
-                      ))}
-                    </ul>
-                  </AlertDescription>
-                </Alert>
+                <ul className="mt-1 list-disc space-y-1 pl-4 text-[11px] leading-5 text-muted-foreground">
+                  {detail.data.completion.blockers.map((blocker) => (
+                    <li key={blocker}>{blocker}</li>
+                  ))}
+                </ul>
               )}
-
-              <div className="rounded-md border bg-surface-raised/40 p-3">
-                <p className="text-xs font-medium text-muted-foreground">下一步</p>
-                <div className="mt-1">
-                  <NextStep
-                    status={task.status}
-                    canComplete={detail.data.completion.canComplete}
-                    blockReason={task.blockReason}
-                  />
-                </div>
+              <div className="mt-2 border-t border-line/60 pt-2">
+                <NextStep
+                  status={task.status}
+                  canComplete={detail.data.completion.canComplete}
+                  blockReason={task.blockReason}
+                />
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </Section>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>状态操作</CardTitle>
-              <CardDescription>所有转换均由 Rust 校验并写入历史。</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <TransitionPanel detail={detail.data} projectArchived={projectArchived} />
-            </CardContent>
-          </Card>
+          <Section>
+            <SectionHeader title="状态操作" meta="由 Rust 校验" />
+            <TransitionPanel detail={detail.data} projectArchived={projectArchived} />
+          </Section>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>元数据</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <dl className="space-y-3 text-sm">
-                {[
-                  ["任务 ID", task.id],
-                  ["修订号", String(task.revision)],
-                  ["创建时间", formatDateTime(task.createdAt)],
-                  ["更新时间", formatDateTime(task.updatedAt)],
-                ].map(([label, value]) => (
-                  <div
-                    key={label}
-                    className="flex items-start justify-between gap-4 border-b pb-2 last:border-0"
-                  >
-                    <dt className="shrink-0 text-muted-foreground">{label}</dt>
-                    <dd className="min-w-0 break-all text-right font-mono text-xs">{value}</dd>
-                  </div>
-                ))}
-              </dl>
-              {task.blockReason ? (
-                <div className="mt-4 rounded-md border border-destructive/35 bg-destructive/5 p-3">
-                  <p className="text-xs font-medium text-destructive">当前阻塞原因</p>
-                  <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-destructive">
-                    {task.blockReason}
-                  </p>
+          <Section>
+            <SectionHeader title="元数据" />
+            <dl className="divide-y divide-line/60 border-t border-line/70 text-xs">
+              {[
+                ["任务 ID", task.id],
+                ["修订号", String(task.revision)],
+                ["创建时间", formatDateTime(task.createdAt)],
+                ["更新时间", formatDateTime(task.updatedAt)],
+              ].map(([label, value]) => (
+                <div key={label} className="flex items-start justify-between gap-4 py-2">
+                  <dt className="shrink-0 text-muted-foreground">{label}</dt>
+                  <dd className="min-w-0 break-all text-right font-mono text-[11px]">{value}</dd>
                 </div>
-              ) : null}
-            </CardContent>
-          </Card>
-        </div>
+              ))}
+            </dl>
+            {task.blockReason ? (
+              <div className="border-l-2 border-destructive bg-destructive/5 px-3 py-2">
+                <p className="text-[10px] font-medium text-destructive">当前阻塞原因</p>
+                <p className="mt-0.5 whitespace-pre-wrap text-[11px] leading-5 text-destructive">
+                  {task.blockReason}
+                </p>
+              </div>
+            ) : null}
+          </Section>
+        </aside>
       </div>
 
       {editOpen ? (

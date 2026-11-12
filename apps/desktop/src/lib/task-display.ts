@@ -30,42 +30,49 @@ export const TASK_STATUS_ORDER: TaskStatus[] = [
 
 export const TASK_STATUS_META: Record<
   TaskStatus,
-  { label: string; icon: LucideIcon; className: string }
+  { label: string; icon: LucideIcon; className: string; textClassName: string }
 > = {
   draft: {
     label: "草稿",
     icon: FilePenLine,
     className: "border-status-draft/35 bg-status-draft/10 text-status-draft",
+    textClassName: "text-status-draft",
   },
   ready: {
     label: "就绪",
     icon: CircleDot,
     className: "border-status-ready/35 bg-status-ready/10 text-status-ready",
+    textClassName: "text-status-ready",
   },
   running: {
     label: "执行中",
     icon: Play,
     className: "border-status-running/35 bg-status-running/10 text-status-running",
+    textClassName: "text-status-running",
   },
   awaiting_verification: {
     label: "待验证",
     icon: Hourglass,
     className: "border-status-awaiting/40 bg-status-awaiting/10 text-status-awaiting",
+    textClassName: "text-status-awaiting",
   },
   done: {
     label: "已完成",
     icon: CheckCircle2,
     className: "border-status-done/35 bg-status-done/10 text-status-done",
+    textClassName: "text-status-done",
   },
   blocked: {
     label: "已阻塞",
     icon: OctagonAlert,
     className: "border-status-blocked/40 bg-status-blocked/10 text-status-blocked",
+    textClassName: "text-status-blocked",
   },
   cancelled: {
     label: "已取消",
     icon: Ban,
     className: "border-status-cancelled/35 bg-status-cancelled/10 text-status-cancelled",
+    textClassName: "text-status-cancelled",
   },
 };
 

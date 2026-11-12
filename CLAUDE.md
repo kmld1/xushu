@@ -68,8 +68,11 @@
 - 前端只访问受限 Tauri Commands；数据库读写及路径/命令权限检查在 Rust 侧。
 - 不能将 AI 文本直接转成 shell 命令执行。验证运行用可执行文件 + 参数数组，不做 shell 字符串拼接；执行前必须用户确认。
 - Claude Hook 默认只采集白名单元数据，**不采集**原始用户提问、完整工具参数/结果、transcript、源码、API Key。
-- Hook 安装是 opt-in；仅修改用户选定项目配置并备份/结构化合并；卸载只删除 XUSHU 自己创建的条目。
-- Hook 数据可能缺失，不得把“未见失败事件”解释为“成功”。
+- Hook 安装是 opt-in；仅修改用户选定项目的 `.claude/settings.local.json`，不得写团队共享 `.claude/settings.json`、用户级或系统级设置；安装前备份并结构化合并；卸载只删除带 `--xushu-managed` 标记且属于该项目的条目。
+- `xushu-hook` CLI 只把白名单事件信封原子写入应用数据目录的有界 spool；不得把原始 stdin JSON 写入 spool、SQLite、日志或 UI。XUSHU 关闭期间可缓冲，但必须在 UI 显示待导入/最近导入，不能假装实时成功。
+- Hook 事件绝不得更新任务状态、验收条件、证据或完成门禁；`Stop`、`PostToolUse` 成功都不等于任务完成。任务 `done` 仍只由独立验收证据与人工确认满足。
+- 真实 Claude Code 联调必须由用户在明确授权的一次性测试项目中手动执行；不得自动启用任何真实项目 Hooks，也不得把构造输入测试等同于真实联调。
+- Hook 数据可能缺失，不得把“未见失败事件”解释为“成功”；会话结束事件缺失时必须显示“结束未确认”。
 - 数据库备份必须保证 SQLite WAL 一致性，并真实测试恢复。
 
 ### UX
@@ -111,10 +114,19 @@
 
 1. **必须先调用 `frontend-design` Skill**：涉及前端界面的任务开始前，先读取并遵循该 Skill 的设计工作流；不得使用子 Agent 或多 Agent，由当前主会话完成设计与开发。
 2. **必须先阅读设计系统**：阅读 `docs/design/DESIGN_SYSTEM.md`，复用其中的 Color / Typography / Spacing / Radius / Shadow / Border / Motion / Z-index Tokens，不随意引入不一致的字体、颜色、圆角、阴影或间距。
-3. **统一 App Shell 与共享组件**：所有一级页面使用同一侧边导航、顶部工具栏、页面标题与内容宽度；优先复用 `components/ui`、`PageHeader`、`Panel`、`StatusBadge`、`EmptyState`、`LoadingState`、`ErrorState`、`Dialog`、`Toast` 等共享组件。
+3. **统一 App Shell 与共享组件**：所有页面使用同一 240px 侧边导航（<760px 收为 52px 图标轨）、44px 顶部工作带（品牌、项目上下文、页面名称、主题、窗口控制）与 1280px 内容宽度；一级页面由工作带承载页面名称，不再使用大标题 `PageHeader`，详情页保留 `PageHeader`。优先复用 `components/ui`、`WorkspaceChrome`、`WindowControls`、`PageHeader`、`Section`、`StatusBadge`、`Sheet`、`EmptyState`、`LoadingState`、`ErrorState`、`Dialog`、`Toast` 等共享组件。
 4. **状态表达必须可信**：任务状态、验收状态、阻塞/失败/过期等必须用图标 + 文字 + 颜色共同表达，禁止只依赖颜色；不得把 AI 文本、前端状态或虚假数据当作完成证据。
 5. **不展示虚假业务数据**：没有真实数据时使用明确空状态，不构造假项目、假任务、假 KPI 或看似真实的进度。
 6. **交互与可访问性**：主操作易发现，破坏性操作二次确认；支持键盘导航、可见焦点、语义化标签与 `aria-*`；深色/浅色主题层级一致。
 7. **视觉验收**：不自动截图/录屏；需要视觉检查时由用户手动提供截图。未完成人工视觉检查时标记 `VISUAL_REVIEW_PENDING`，不得声称 UI 已完美通过。
 8. **审计与维护**：每次页面变更后更新 `docs/design/UI_AUDIT.md`；改变全局设计语言需说明原因与影响范围，不得只改单页造成风格割裂。
 9. **质量不降级**：视觉调整不得削弱 Rust 领域校验、SQLite 事务、Tauri IPC 权限或既有测试；技术检查通过不等于视觉验收通过。
+
+### 7.1 Phase 3.5 / 3.6 长期补充：Integrated Window Workspace
+
+10. **一体化工作区**：一级页面统一使用 240px 左侧工作区侧栏（<760px 收为 52px 图标轨）+ 44px 顶部工作带；工作带承载品牌、当前项目、分支/HEAD、页面名称、主题与自绘窗口控制。不得恢复原生标题栏，也不得在工作带下再放第二层应用信息条。
+11. **自定义标题栏与原生行为**：自 Phase 3.6 起使用 `decorations: false`；必须保留拖动、双击最大化/还原、最小化、最大化、关闭、边缘缩放、Windows Snap Layouts、DPI 与焦点行为。Snap 通过最大化按钮位置的 `HTMAXBUTTON` 覆盖层恢复。窗口控制仅开放 `set-theme`、`start-dragging`、`internal-toggle-maximize`、`minimize`、`toggle-maximize`、`close`、`is-maximized`；不得启用 `withGlobalTauri` 或引入未审查的窗口插件。修改窗口层必须回归 ADR-0006 清单并更新文档。
+12. **减少容器**：页面优先使用 Section、行、表格、分隔线与留白；Card 只用于独立交互容器、重要安全提示或需要明确边界的内容。禁止空状态套 Card、Card 套 Card、七种状态铺成七张统计卡。
+13. **语义 Token 唯一**：颜色、字号、间距、圆角、阴影、状态必须来自 `docs/design/DESIGN_SYSTEM.md` 与 `index.css`；页面不得硬编码第二套配色。命令、cwd、HEAD、哈希、证据使用 `code-*` 深色终端块与等宽字体。
+14. **窗口与主题验证**：UI 改动后至少检查 1366×768、1600×900、1920×1080、500×480、100%/150% 缩放与深浅主题，确认无页面级横向溢出；同时回归窗口控制、拖动、双击、Snap 命中与关闭。无法自动化的视觉/窗口行为（Snap 悬停菜单、多显示器、其它 DPI、实机双击）标记为待人工确认。
+15. **验收表达不可弱化**：自动验证、人工确认、AI 声明必须来源可辨；PASS/FAIL/NOT_RUN/INCONCLUSIVE/STALE 使用图标 + 中文 + 颜色；不得为了视觉简洁隐藏 blockers、过期原因或证据入口。UI 改造不得改变 Phase 3 的验收语义与 Rust 完成门禁。

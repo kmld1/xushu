@@ -3,6 +3,7 @@
 //! Phase 1 提供 SQLite 基础与持久化探针；Phase 2 增加项目、任务、验收条件、
 //! 人工确认与统一状态机。所有业务状态转换都必须经过本 crate 的服务层。
 
+pub mod claude;
 pub mod code_state;
 pub mod db;
 pub mod error;
@@ -17,6 +18,12 @@ pub mod task;
 mod validation;
 pub mod verification;
 
+pub use claude::{
+    ClaudeActionInput, ClaudeActivityEvent, ClaudeActivitySnapshot, ClaudeHookPlannedEntry,
+    ClaudeHookPreview, ClaudeImportReport, ClaudeInstallState, ClaudeIntegrationService,
+    ClaudeIntegrationStatus, ClaudeRuntimePaths, ClaudeSessionSummary, ClaudeToolCallSummary,
+    InstallClaudeHooksInput,
+};
 pub use code_state::CodeState;
 pub use db::{run_migrations, Database, DatabaseHealth, Migration, MigrationReport, MIGRATIONS};
 pub use error::CoreError;

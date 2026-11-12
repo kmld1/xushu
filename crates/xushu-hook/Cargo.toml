@@ -1,0 +1,16 @@
+[package]
+name = "xushu-hook"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "xushu-hook"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "=1.0.154"
+xushu-hook-protocol = { path = "../xushu-hook-protocol" }
+
+[dev-dependencies]
+tempfile = "=3.27.0"

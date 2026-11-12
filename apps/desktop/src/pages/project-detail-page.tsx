@@ -6,9 +6,10 @@ import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { LoadingState } from "@/components/loading-state";
 import { PageHeader } from "@/components/page-header";
+import { Section, SectionHeader } from "@/components/section";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ClaudeIntegrationSection } from "@/features/claude/claude-integration-section";
 import { ProjectActionsMenu } from "@/features/projects/project-actions-menu";
 import { ProjectGitSummary } from "@/features/projects/project-git-summary";
 import { useProject, useProjects } from "@/features/projects/queries";
@@ -39,8 +40,8 @@ export function ProjectDetailPage() {
 
   if (project.isPending) {
     return (
-      <div className="space-y-6">
-        <PageHeader title="项目详情" description="加载项目信息…" />
+      <div className="space-y-5">
+        <PageHeader title="项目详情" />
         <LoadingState rows={4} />
       </div>
     );
@@ -48,8 +49,8 @@ export function ProjectDetailPage() {
 
   if (project.isError || !project.data) {
     return (
-      <div className="space-y-6">
-        <Button asChild variant="ghost" size="sm">
+      <div className="space-y-5">
+        <Button asChild variant="ghost" size="sm" className="-ml-2">
           <Link to="/projects">
             <ArrowLeft aria-hidden="true" />
             返回项目列表
@@ -67,9 +68,9 @@ export function ProjectDetailPage() {
   const isCurrent = currentProject?.id === current.id;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
-        <Button asChild variant="ghost" size="sm" className="-ml-2 mb-2">
+        <Button asChild variant="ghost" size="sm" className="-ml-2 mb-1">
           <Link to="/projects">
             <ArrowLeft aria-hidden="true" />
             返回项目列表
@@ -77,7 +78,18 @@ export function ProjectDetailPage() {
         </Button>
         <PageHeader
           title={current.name}
-          description={current.rootPath}
+          meta={
+            <>
+              {isCurrent ? <Badge variant="secondary">当前项目</Badge> : null}
+              {archived ? <Badge variant="secondary">已归档</Badge> : null}
+              <span
+                className="max-w-[min(70vw,640px)] truncate font-mono text-[10px]"
+                title={current.rootPath}
+              >
+                {current.rootPath}
+              </span>
+            </>
+          }
           actions={
             <>
               {!archived && !isCurrent ? (
@@ -105,78 +117,37 @@ export function ProjectDetailPage() {
             </>
           }
         />
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          {isCurrent ? <Badge variant="secondary">当前项目</Badge> : null}
-          {archived ? <Badge variant="secondary">已归档</Badge> : null}
-          <span className="text-xs text-muted-foreground">
-            更新于 {formatDateTime(current.updatedAt)}
-          </span>
+      </div>
+
+      <div className="border-y border-line/70 py-3">
+        <SectionHeader title="仓库" meta="只读 Git" />
+        <div className="mt-2">
+          <ProjectGitSummary projectId={current.id} />
         </div>
       </div>
 
-      <div className="grid items-start gap-5 xl:grid-cols-[1.4fr_1fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FolderGit2 className="size-4 text-primary" aria-hidden="true" />
-              Git 状态
-            </CardTitle>
-            <CardDescription>
-              XUSHU 只读检查分支、HEAD 与工作区；不会执行 checkout、reset、clean 等写操作。
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <ProjectGitSummary projectId={current.id} />
-            <p className="truncate font-mono text-[11px] text-muted-foreground">
-              {current.rootPath}
-            </p>
-          </CardContent>
-        </Card>
+      <ClaudeIntegrationSection project={current} archived={archived} />
 
-        <Card>
-          <CardHeader>
-            <CardTitle>项目数据</CardTitle>
-            <CardDescription>仅保存 XUSHU 管理所需元数据。</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <dl className="space-y-3 text-sm">
-              {[
-                ["项目 ID", current.id],
-                ["创建时间", formatDateTime(current.createdAt)],
-                ["更新时间", formatDateTime(current.updatedAt)],
-                ["归档状态", archived ? "已归档" : "进行中"],
-              ].map(([label, value]) => (
-                <div
-                  key={label}
-                  className="flex items-start justify-between gap-4 border-b pb-2 last:border-0"
+      <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_280px]">
+        <Section className="min-w-0">
+          <SectionHeader
+            title="项目任务"
+            meta={archived ? "只读" : "按最近更新排序"}
+            actions={
+              !archived ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCreateOpen(true)}
                 >
-                  <dt className="shrink-0 text-muted-foreground">{label}</dt>
-                  <dd className="min-w-0 break-all text-right font-mono text-xs">{value}</dd>
-                </div>
-              ))}
-            </dl>
-          </CardContent>
-        </Card>
-      </div>
+                  <Plus aria-hidden="true" />
+                  新建任务
+                </Button>
+              ) : null
+            }
+          />
 
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <CardTitle>项目任务</CardTitle>
-              <CardDescription>
-                {archived ? "项目已归档，任务只读展示。" : "按最近更新时间排序。"}
-              </CardDescription>
-            </div>
-            {!archived ? (
-              <Button type="button" variant="outline" size="sm" onClick={() => setCreateOpen(true)}>
-                <Plus aria-hidden="true" />
-                新建任务
-              </Button>
-            ) : null}
-          </div>
-        </CardHeader>
-        <CardContent>
           {tasks.isPending ? (
             <LoadingState rows={3} />
           ) : tasks.isError ? (
@@ -204,10 +175,38 @@ export function ProjectDetailPage() {
               }
             />
           ) : (
-            <TaskTable tasks={tasks.data} projects={projects.data ?? [current]} />
+            <div className="overflow-hidden rounded-md border border-line/70 bg-card">
+              <TaskTable
+                tasks={tasks.data}
+                projects={projects.data ?? [current]}
+                readOnly={archived}
+              />
+            </div>
           )}
-        </CardContent>
-      </Card>
+        </Section>
+
+        <aside className="min-w-0 xl:border-l xl:border-line/70 xl:pl-6">
+          <Section>
+            <SectionHeader title="项目信息" />
+            <dl className="divide-y divide-line/60 border-t border-line/70 text-xs">
+              {[
+                ["项目 ID", current.id],
+                ["创建时间", formatDateTime(current.createdAt)],
+                ["更新时间", formatDateTime(current.updatedAt)],
+                ["归档状态", archived ? "已归档" : "进行中"],
+              ].map(([label, value]) => (
+                <div key={label} className="flex items-start justify-between gap-4 py-2">
+                  <dt className="shrink-0 text-muted-foreground">{label}</dt>
+                  <dd className="min-w-0 break-all text-right font-mono text-[11px]">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className="pt-1 text-[11px] leading-5 text-muted-foreground">
+              XUSHU 只读检查分支、HEAD 与工作区，不执行 checkout、reset、clean 等写操作。
+            </p>
+          </Section>
+        </aside>
+      </div>
 
       {createOpen ? (
         <CreateTaskDialog

@@ -35,6 +35,7 @@ impl ApiError {
                 Self::new("APPROVAL_REQUIRED", "需要你明确批准后才能执行验证")
             }
             CoreError::Verification(message) => Self::new("VERIFICATION_ERROR", message),
+            CoreError::Claude(message) => Self::new("CLAUDE_INTEGRATION_ERROR", message),
             CoreError::Unavailable => Self::new("DATABASE_UNAVAILABLE", "本地数据库尚未就绪"),
             CoreError::LockPoisoned => {
                 Self::new("DATABASE_LOCK_ERROR", "本地数据库连接暂时不可用，请重试")

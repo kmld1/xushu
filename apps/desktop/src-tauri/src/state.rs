@@ -4,8 +4,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use xushu_core::{
-    code_state, runner, AcceptanceReport, CoreError, Database, RunControl, StartVerificationInput,
-    VerificationRun, VerificationService,
+    code_state, runner, AcceptanceReport, ClaudeActionInput, ClaudeActivitySnapshot,
+    ClaudeHookPreview, ClaudeImportReport, ClaudeIntegrationService, ClaudeIntegrationStatus,
+    ClaudeRuntimePaths, CoreError, Database, InstallClaudeHooksInput, RunControl,
+    StartVerificationInput, VerificationRun, VerificationService,
 };
 
 use crate::error::ApiError;
@@ -18,11 +20,38 @@ pub struct AppState {
     startup_error: Option<ApiError>,
     controls: Arc<Mutex<HashMap<String, Arc<RunControl>>>>,
     exports_directory: Arc<PathBuf>,
+    claude_runtime: Option<Arc<ClaudeRuntimePaths>>,
+    claude_startup_error: Option<ApiError>,
+    claude_mutation: Arc<Mutex<()>>,
 }
 
 impl AppState {
     pub fn initialize(data_directory: &Path) -> Self {
         let exports_directory = data_directory.join("exports");
+        let hook_binary = resolve_hook_binary();
+        let claude_runtime = match ClaudeRuntimePaths::prepare(
+            data_directory,
+            hook_binary,
+            env!("CARGO_PKG_VERSION"),
+        ) {
+            Ok(runtime) => Some(Arc::new(runtime)),
+            Err(error) => {
+                eprintln!(
+                    "[xushu] claude hook runtime initialization failed: code={}",
+                    error.code()
+                );
+                None
+            }
+        };
+        let claude_startup_error = if claude_runtime.is_none() {
+            Some(ApiError::new(
+                "CLAUDE_UNAVAILABLE",
+                "Claude Code Hook 接收器初始化失败，请检查应用数据目录权限后重启应用",
+            ))
+        } else {
+            None
+        };
+
         let result = fs::create_dir_all(data_directory)
             .map_err(CoreError::from)
             .and_then(|()| Database::open(data_directory.join("xushu.db")));
@@ -41,11 +70,22 @@ impl AppState {
                     }
                     _ => {}
                 }
+                if let Some(runtime) = &claude_runtime {
+                    let reports =
+                        ClaudeIntegrationService::new(&database, runtime).import_pending_all();
+                    let imported: usize = reports.iter().map(|report| report.imported).sum();
+                    if imported > 0 {
+                        eprintln!("[xushu] imported {imported} pending Claude Code hook event(s)");
+                    }
+                }
                 Self {
                     database: Arc::new(Mutex::new(Some(database))),
                     startup_error: None,
                     controls: Arc::new(Mutex::new(HashMap::new())),
                     exports_directory: Arc::new(exports_directory),
+                    claude_runtime,
+                    claude_startup_error,
+                    claude_mutation: Arc::new(Mutex::new(())),
                 }
             }
             Err(error) => {
@@ -61,6 +101,9 @@ impl AppState {
                     )),
                     controls: Arc::new(Mutex::new(HashMap::new())),
                     exports_directory: Arc::new(exports_directory),
+                    claude_runtime,
+                    claude_startup_error,
+                    claude_mutation: Arc::new(Mutex::new(())),
                 }
             }
         }
@@ -83,6 +126,97 @@ impl AppState {
         })?;
 
         operation(database).map_err(ApiError::from_core)
+    }
+
+    fn claude_runtime(&self) -> Result<Arc<ClaudeRuntimePaths>, ApiError> {
+        if let Some(error) = &self.claude_startup_error {
+            return Err(error.clone());
+        }
+        self.claude_runtime.clone().ok_or_else(|| {
+            ApiError::new(
+                "CLAUDE_UNAVAILABLE",
+                "Claude Code Hook 接收器尚未就绪，请重启应用",
+            )
+        })
+    }
+
+    pub fn get_claude_status(&self, project_id: &str) -> Result<ClaudeIntegrationStatus, ApiError> {
+        let runtime = self.claude_runtime()?;
+        self.with_database(|database| {
+            ClaudeIntegrationService::new(database, &runtime).refresh(project_id)
+        })
+    }
+
+    pub fn get_claude_activity(
+        &self,
+        project_id: &str,
+    ) -> Result<ClaudeActivitySnapshot, ApiError> {
+        let runtime = self.claude_runtime()?;
+        self.with_database(|database| {
+            ClaudeIntegrationService::new(database, &runtime).activity(project_id)
+        })
+    }
+
+    pub fn preview_claude_hooks(&self, project_id: &str) -> Result<ClaudeHookPreview, ApiError> {
+        let runtime = self.claude_runtime()?;
+        self.with_database(|database| {
+            ClaudeIntegrationService::new(database, &runtime).preview(project_id)
+        })
+    }
+
+    pub fn install_claude_hooks(
+        &self,
+        input: InstallClaudeHooksInput,
+    ) -> Result<ClaudeIntegrationStatus, ApiError> {
+        let runtime = self.claude_runtime()?;
+        let _guard = self.claude_mutation.lock().map_err(|_| {
+            ApiError::new(
+                "CLAUDE_UNAVAILABLE",
+                "Claude Code 接入状态暂时不可用，请重试",
+            )
+        })?;
+        self.with_database(|database| {
+            ClaudeIntegrationService::new(database, &runtime).install(input)
+        })
+    }
+
+    pub fn disable_claude_hooks(
+        &self,
+        input: ClaudeActionInput,
+    ) -> Result<ClaudeIntegrationStatus, ApiError> {
+        let runtime = self.claude_runtime()?;
+        let _guard = self.claude_mutation.lock().map_err(|_| {
+            ApiError::new(
+                "CLAUDE_UNAVAILABLE",
+                "Claude Code 接入状态暂时不可用，请重试",
+            )
+        })?;
+        self.with_database(|database| {
+            ClaudeIntegrationService::new(database, &runtime).disable(input)
+        })
+    }
+
+    pub fn uninstall_claude_hooks(
+        &self,
+        input: ClaudeActionInput,
+    ) -> Result<ClaudeIntegrationStatus, ApiError> {
+        let runtime = self.claude_runtime()?;
+        let _guard = self.claude_mutation.lock().map_err(|_| {
+            ApiError::new(
+                "CLAUDE_UNAVAILABLE",
+                "Claude Code 接入状态暂时不可用，请重试",
+            )
+        })?;
+        self.with_database(|database| {
+            ClaudeIntegrationService::new(database, &runtime).uninstall(input)
+        })
+    }
+
+    pub fn refresh_claude_events(&self, project_id: &str) -> Result<ClaudeImportReport, ApiError> {
+        let runtime = self.claude_runtime()?;
+        self.with_database(|database| {
+            ClaudeIntegrationService::new(database, &runtime).import_pending(project_id)
+        })
     }
 
     /// 准备并启动后台验证线程；数据库只写入 `running` 记录，进程在后台执行。
@@ -161,5 +295,53 @@ impl AppState {
         self.with_database(|database| {
             VerificationService::new(database).export_report(task_id, &self.exports_directory)
         })
+    }
+}
+
+fn resolve_hook_binary() -> Option<PathBuf> {
+    if let Some(configured) = std::env::var_os("XUSHU_HOOK_BIN") {
+        let path = PathBuf::from(configured);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    let executable = std::env::current_exe().ok()?;
+    let directory = executable.parent()?;
+    let names: &[&str] = if cfg!(windows) {
+        &["xushu-hook.exe", "xushu-hook-x86_64-pc-windows-msvc.exe"]
+    } else {
+        &["xushu-hook"]
+    };
+    names
+        .iter()
+        .map(|name| directory.join(name))
+        .find(|path| path.is_file())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::TempDir;
+
+    use super::*;
+
+    #[test]
+    fn database_and_claude_runtime_failures_are_reported_without_panicking() {
+        let directory = TempDir::new().expect("temp dir");
+        let not_a_directory = directory.path().join("not-a-directory");
+        fs::write(&not_a_directory, b"x").expect("write file");
+
+        let state = AppState::initialize(&not_a_directory);
+        let error = state
+            .with_database(|_| Ok::<_, CoreError>(()))
+            .expect_err("database must be unavailable");
+        assert_eq!(error.code, "DATABASE_UNAVAILABLE");
+
+        let error = state
+            .get_claude_status("11111111-1111-4111-8111-111111111111")
+            .expect_err("claude runtime must be unavailable");
+        assert_eq!(error.code, "CLAUDE_UNAVAILABLE");
     }
 }

@@ -1,8 +1,8 @@
 # 依赖与工具链基线
 
-> 状态：**Phase 3 PASS**（2026-11-06）。
+> 状态：**Phase 4 代码与技术检查 PASS；真实 Claude Code 联调 NOT_RUN；整体视觉验收 VISUAL_REVIEW_PENDING**（2026-11-09）。
 >
-> 本文件只记录实际安装、实际锁定并通过检查的版本。依赖升级必须重新生成
+> 报告：`docs/phases/PHASE_4_REPORT.md`。本文件只记录实际安装、实际锁定并通过检查的版本。依赖升级必须重新生成
 > `pnpm-lock.yaml` / `Cargo.lock`，并复跑文末质量门禁。
 
 ## 1. 本机工具链实测
@@ -25,6 +25,7 @@
 | Windows SDK | 10.0.26100.0 | PASS | `windows.h`、`user32.lib`、`rc.exe` 存在 |
 | WebView2 Runtime | 156.0.4314.58 | PASS | Tauri 启动时创建 `msedgewebview2.exe` 子进程 |
 | Python（仅测试辅助） | 3.14.7 | PASS（辅助） | 独立只读 `sqlite3` 核验数据库；不是应用依赖 |
+| Claude Code | 2.1.319 | PASS（Schema 核对） | `claude --version`；Hooks reference/guide/settings 官方文档 |
 
 ## 2. 前端直接依赖
 
@@ -83,7 +84,7 @@
 
 ## 3. Rust 依赖
 
-锁文件：`Cargo.lock`（108 KB）；`cargo check --workspace --all-targets --locked` 退出码 0。
+锁文件：`Cargo.lock`（105 KB）；`cargo check --workspace --all-targets --locked` 退出码 0。
 
 | 包 | 锁定版本 | 说明 |
 |---|---|---|
@@ -100,8 +101,17 @@
 | `regex` | 1.13.1 | 验证输出模式化脱敏 |
 | `serde_json` | 1.0.154 | 验证参数数组与证据元数据 |
 | `sha2` | 0.10.9 | 工作区内容指纹与证据摘要哈希 |
-| `windows-sys` | 0.61.2 | Windows Job Object 进程树清理（仅 Windows target） |
-| `tempfile` | 3.27.0 | 仅 dev/test 临时数据库 |
+| `windows-sys` | 0.61.2 | Windows Job Object 进程树清理 + Phase 3.6 窗口 Snap 覆盖层（仅 Windows target） |
+| `tempfile` | 3.27.0 | 仅 dev/test 临时数据库与 Hook 测试 |
+
+内部 crate：
+
+| crate | 说明 |
+|---|---|
+| `xushu-core` | 领域、SQLite、验证据、Claude 接入与导入 |
+| `xushu-hook-protocol` | Hook 白名单信封、字段校验、带盐哈希；不依赖 SQLite |
+| `xushu-hook` | 独立 Hook CLI；依赖 `serde_json` 与协议 crate |
+| `xushu-desktop` | Tauri 命令、窗口与状态 |
 
 - Rust edition：2021；workspace `rust-version = "1.90"`。
 - `rust-toolchain.toml`：`channel = "stable"`、`rustfmt`、`clippy`、
@@ -116,14 +126,19 @@
 5. **TanStack Query 5.106.1** peer 支持 React 18/19；**Zustand 5.0.16** peer 支持 React >=18。
 6. **React Hook Form 7.91.0 + Zod 4.6.7 + @hookform/resolvers 7.0.3**：resolvers 的 zod peer 为 `^3.25.0 || ^4.0.0`，组合已验证通过类型检查与测试。
 7. **Tailwind CSS 4.3.4** 通过 `@tailwindcss/vite` 接入；peer 支持 Vite 8。
-8. **Vitest 5.1.0 / jsdom 31.0.0** 与 Node 24.20.0、Vite 8.3.6 兼容；13 个前端测试通过。
+8. **Vitest 5.1.0 / jsdom 31.0.0** 与 Node 24.20.0、Vite 8.3.6 兼容；Phase 4 实测 48 个前端测试通过。
 9. **rusqlite 0.41.1 bundled** 在 MSVC 14.51 + Windows SDK 10.0.26100 下实际编译、链接并运行；WAL、外键与迁移测试通过。
 10. `@tauri-apps/cli 2.12.4` 与 `tauri 2.12.5` 已在本机实际编译并启动。
 11. **Radix UI 1.x/2.x 与 sonner 2.0.8** 均声明支持 React 19；实际 typecheck、Lint、Vitest 与桌面启动通过。
 12. Phase 2 未新增 Rust crate；状态机、项目/任务服务、Git 只读检查使用现有 `rusqlite` / `serde` / `uuid` / `chrono` / `thiserror`。
 13. Phase 3 新增 `regex 1.13.1`、`serde_json 1.0.154`、`sha2 0.10.9` 为直接依赖；三者此前已在 `Cargo.lock` 中作为传递依赖存在，版本未变。
-14. `windows-sys 0.61.2` 仅用于 Windows Job Object，启用 `Win32_Foundation`、`Win32_Security`、`Win32_System_JobObjects`、`Win32_System_Threading`；非 Windows 不编译该依赖。
+14. `windows-sys 0.61.2` 在 `xushu-core` 中用于 Windows Job Object，启用 `Win32_Foundation`、`Win32_Security`、`Win32_System_JobObjects`、`Win32_System_Threading`；Phase 3.6 在 desktop crate 中为窗口 Snap 覆盖层启用 `Win32_Foundation`、`Win32_Graphics_Dwm`、`Win32_Graphics_Gdi`、`Win32_System_LibraryLoader`、`Win32_UI_HiDpi`、`Win32_UI_Input_KeyboardAndMouse`、`Win32_UI_Shell`、`Win32_UI_WindowsAndMessaging`。版本不变，无新 crate 版本进入锁文件；非 Windows 不编译该依赖。
 15. 验证运行器使用 `std::process::Command` 与参数数组，不引入 Shell 插件或命令执行框架。
+16. Phase 3.5 未新增前端或 Rust 依赖；仅新增 `core:window:allow-set-theme` 能力，用于原生标题栏主题同步。
+17. Phase 3.6 未新增前端或 Rust 包版本；`windows-sys 0.61.2` 此前已在锁文件中，仅为 desktop crate 启用窗口相关 feature。未引入 `tauri-plugin-frame` / `decorum`，未启用 `withGlobalTauri`。capabilities 新增 `start-dragging`、`internal-toggle-maximize`、`minimize`、`toggle-maximize`、`close`、`is-maximized`，均为自定义窗口控制的最小权限。
+18. Phase 4 新增内部 crate `xushu-hook-protocol` 与 `xushu-hook`；未引入 Clap、Tokio、HTTP 服务、Shell 插件或新第三方运行时。`serde_json`/`sha2`/`chrono`/`uuid`/`thiserror` 已在锁文件中，版本未变。
+19. Phase 4 的 Hook 配置使用官方 `command` + `args` exec 形式，不经过 shell；Claude Code 2.1.319 官方文档核对了六个事件字段与 `PostToolUseFailure` 的 `error`/`is_interrupt`。`Stop` 的 `last_assistant_message` 与 `PostToolUse` 的 `tool_response` 被明确忽略。
+20. Phase 4 没有新增 Tauri capability 或插件；新增的七个 Claude IPC 命令都是应用自定义 command，前端仍无通用 FS/Shell/SQL 权限。
 
 ## 5. 锁文件与复现策略
 
@@ -143,41 +158,44 @@
 - 数据库：Tauri `app_data_dir()` 下的 `xushu.db`；Windows 实测
   `%APPDATA%\dev.xushu.desktop\xushu.db`，不进入仓库。
 - PRAGMA：`foreign_keys=ON`、`journal_mode=WAL`、`synchronous=NORMAL`、`busy_timeout=5000`。
-- Schema（迁移版本 3）：`schema_migrations`、`persistence_probes`、`projects`、`tasks`、
+- Schema（迁移版本 4）：`schema_migrations`、`persistence_probes`、`projects`、`tasks`、
   `acceptance_criteria`、`task_transitions`、`manual_confirmations`、`verification_specs`、
-  `verification_runs`、`verification_checks`、`evidence`。
+  `verification_runs`、`verification_checks`、`evidence`、`claude_integrations`、
+  `claude_sessions`、`claude_tool_calls`、`claude_events`。
 - Phase 2 业务表使用 UUID、UTC RFC3339、外键、CHECK 约束、唯一根路径 key 与人工确认修订唯一索引。
 - Phase 3 验证表保留运行快照、修订号、Git/工作区指纹、脱敏输出与证据哈希；检查与证据按 run 唯一。
-- Capabilities：仅 `core:default`；无 Shell / FS / SQL 插件权限。
+- Phase 4 Claude 表只保存白名单元数据与带盐哈希；不保存原始 Hook JSON、Prompt、命令、文件内容、工具输出或 transcript。`delivery_id` 唯一约束保证导入幂等，工具事件带语义去重键。
+- Capabilities：`core:default` + `core:window:allow-set-theme` + `start-dragging` / `internal-toggle-maximize` / `minimize` / `toggle-maximize` / `close` / `is-maximized`（Phase 3.6 自定义窗口控制）；无 Shell / FS / SQL 插件权限，未启用 `withGlobalTauri`。
 - CSP：
   - 生产：`default-src 'self'; connect-src ipc: http://ipc.localhost; ...; script-src 'self'; object-src 'none'; base-uri 'self'`
   - 开发：额外允许 `ws://localhost:1420/1421` 与 Vite 内联 refresh 脚本。
   - 生产 CSP 尚未用 `tauri build` 成品运行验证，属于遗留验证项。
 
-## 7. 本轮实际通过的质量门禁（2026-11-06）
+## 7. 本轮实际通过的质量门禁（2026-11-09）
 
 | 命令 | 退出码 | 结果 |
 |---|---|---|
 | `pnpm install --frozen-lockfile` | 0 | 锁文件一致 |
 | `pnpm typecheck` | 0 | `tsc --noEmit` 通过 |
 | `pnpm lint` | 0 | ESLint 10，`--max-warnings 0` |
-| `pnpm test` | 0 | 7 个测试文件、40 个测试通过 |
-| `pnpm build` | 0 | Vite 生产构建通过；JS 757.52 kB / gzip 229.36 kB（有 >500 kB chunk 提示） |
+| `pnpm test` | 0 | 8 个测试文件、48 个测试通过（Phase 4 新增 5 个接入测试） |
+| `pnpm build` | 0 | Vite 生产构建通过；JS 827.13 kB / gzip 246.40 kB（有 >500 kB chunk 提示） |
 | `pnpm format` | 0 | Prettier 检查通过 |
 | `cargo check --workspace --all-targets --locked` | 0 | Rust workspace 通过 |
 | `cargo fmt --all -- --check` | 0 | rustfmt 通过 |
 | `cargo clippy --workspace --all-targets -- -D warnings` | 0 | Clippy 通过 |
-| `cargo test --workspace` | 0 | 11 个 lib 测试 + 19 个业务 + 12 个持久化 + 26 个验证测试通过 |
+| `cargo test --workspace` | 0 | 11 个 lib + 19 个业务 + 19 个 Claude + 12 个持久化 + 26 个验证 + 2 个桌面 + 6 个 Hook CLI + 5 个协议 = 100 个测试通过 |
 | `pnpm tauri info` | 0 | 环境与依赖版本被正确识别 |
+| Hook release 计时 | 0 | `xushu-hook.exe` 30 次调用平均 14.46 ms；无敏感内容落入 spool |
+| 桌面无截图冒烟 | 0 | 项目详情接入区块、安装预览、1366/500 布局、工作台回归；未安装任何真实项目 Hooks |
 
 ## 8. 已规划但本阶段未安装
 
-- `xushu-hook` CLI（Phase 4）
-- Claude Code Hooks 相关依赖（Phase 4）
+- 生产安装包的 `xushu-hook` sidecar 打包与升级路径（Phase 7）
 - 备份/恢复、日志脱敏与安全加固依赖（Phase 6）
 - 安装包、签名与分发工具（Phase 7）
 
-## 9. 官方参考（核对日期：2026-11-06）
+## 9. 官方参考（核对日期：2026-11-09）
 
 - Tauri prerequisites：<https://v2.tauri.app/start/prerequisites/>
 - Tauri 2.12 发布说明：<https://v2.tauri.app/blog/tauri-2.12/>
@@ -185,6 +203,9 @@
 - Tauri CSP：<https://v2.tauri.app/security/csp/>
 - SQLite WAL：<https://www.sqlite.org/wal.html>
 - SQLite PRAGMA：<https://www.sqlite.org/pragma.html>
+- Claude Code Hooks：<https://code.claude.com/docs/en/hooks>
+- Claude Code Hooks guide：<https://code.claude.com/docs/en/hooks-guide>
+- Claude Code settings：<https://code.claude.com/docs/en/settings>
 - Vite：<https://vite.dev/guide/>
 - shadcn/ui Tailwind v4：<https://ui.shadcn.com/docs/tailwind-v4>
 - TypeScript 7 / typescript-eslint 兼容性：<https://github.com/typescript-eslint/typescript-eslint/issues/12518>

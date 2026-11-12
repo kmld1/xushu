@@ -1,7 +1,9 @@
 mod business_commands;
+mod claude_commands;
 mod commands;
 mod error;
 mod state;
+mod window_chrome;
 
 use tauri::Manager;
 
@@ -12,7 +14,28 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let data_directory = app.path().app_data_dir()?;
+            let isolated_build = app.config().identifier.starts_with("dev.xushu.e2e.");
+            let expected_data = std::env::var_os("XUSHU_E2E_DATA_DIR");
+            if isolated_build || expected_data.is_some() {
+                let expected = expected_data.and_then(|path| std::fs::canonicalize(path).ok());
+                if !isolated_build
+                    || expected.is_none()
+                    || std::fs::canonicalize(&data_directory).ok() != expected
+                {
+                    return Err(std::io::Error::other(
+                        "desktop E2E data directory does not match the launcher",
+                    )
+                    .into());
+                }
+            }
             app.manage(AppState::initialize(&data_directory));
+
+            if let Some(window) = app.get_webview_window("main") {
+                if let Err(error) = window_chrome::install(&window) {
+                    eprintln!("无法安装窗口 Snap 覆盖层：{error}");
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -54,6 +77,13 @@ pub fn run() {
             business_commands::get_evidence,
             business_commands::list_verification_queue,
             business_commands::export_acceptance_report,
+            claude_commands::get_claude_integration,
+            claude_commands::get_claude_activity,
+            claude_commands::preview_claude_hooks,
+            claude_commands::install_claude_hooks,
+            claude_commands::disable_claude_hooks,
+            claude_commands::uninstall_claude_hooks,
+            claude_commands::refresh_claude_events,
         ])
         .run(tauri::generate_context!())
         .expect("运行序枢 XUSHU 桌面程序失败");
