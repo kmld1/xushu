@@ -525,3 +525,446 @@ export type ClaudeActionInput = {
   projectId: string;
   approved: boolean;
 };
+
+export type MemoryCategory =
+  | "goal"
+  | "constraint"
+  | "architecture"
+  | "convention"
+  | "fact"
+  | "risk"
+  | "follow_up"
+  | "knowledge";
+
+export type MemorySourceType = "user" | "system" | "git" | "verification" | "hook" | "inference";
+
+export type MemoryConfirmationStatus = "unconfirmed" | "confirmed";
+
+export type MemoryValidityStatus = "active" | "archived";
+
+export type LinkedTaskRef = {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  archived: boolean;
+};
+
+export type ProjectMemory = {
+  id: string;
+  projectId: string;
+  category: MemoryCategory;
+  title: string;
+  content: string;
+  sourceType: MemorySourceType;
+  confirmationStatus: MemoryConfirmationStatus;
+  validityStatus: MemoryValidityStatus;
+  linkedTaskId: string | null;
+  linkedEvidenceId: string | null;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  confirmedAt: string | null;
+  archivedAt: string | null;
+};
+
+export type ProjectMemoryView = {
+  memory: ProjectMemory;
+  linkedTask: LinkedTaskRef | null;
+};
+
+export type ProjectMemoryRevision = {
+  id: string;
+  memoryId: string;
+  revision: number;
+  category: MemoryCategory;
+  title: string;
+  content: string;
+  sourceType: MemorySourceType;
+  confirmationStatus: MemoryConfirmationStatus;
+  validityStatus: MemoryValidityStatus;
+  linkedTaskId: string | null;
+  linkedEvidenceId: string | null;
+  changeNote: string | null;
+  changedAt: string;
+};
+
+export type MemoryDetail = {
+  memory: ProjectMemoryView;
+  revisions: ProjectMemoryRevision[];
+};
+
+export type CreateMemoryInput = {
+  projectId: string;
+  category: MemoryCategory;
+  title: string;
+  content: string;
+  sourceType?: MemorySourceType | null;
+  confirmed?: boolean | null;
+  linkedTaskId?: string | null;
+  linkedEvidenceId?: string | null;
+};
+
+export type UpdateMemoryInput = {
+  projectId: string;
+  memoryId: string;
+  expectedRevision: number;
+  category: MemoryCategory;
+  title: string;
+  content: string;
+  linkedTaskId?: string | null;
+  linkedEvidenceId?: string | null;
+  changeNote?: string | null;
+};
+
+export type ConfirmMemoryInput = {
+  projectId: string;
+  memoryId: string;
+  expectedRevision: number;
+};
+
+export type ArchiveMemoryInput = {
+  projectId: string;
+  memoryId: string;
+  expectedRevision: number;
+  reason?: string | null;
+};
+
+export type MemoryFilter = {
+  projectId: string;
+  category?: MemoryCategory | null;
+  includeArchived?: boolean | null;
+  taskId?: string | null;
+};
+
+export type DecisionStatus = "draft" | "confirmed" | "superseded" | "deprecated";
+
+export type Decision = {
+  id: string;
+  projectId: string;
+  taskId: string | null;
+  title: string;
+  problem: string;
+  context: string;
+  alternatives: string[];
+  decision: string;
+  rationale: string;
+  risks: string;
+  status: DecisionStatus;
+  supersedesId: string | null;
+  supersededById: string | null;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  confirmedAt: string | null;
+  deprecatedAt: string | null;
+};
+
+export type DecisionView = {
+  decision: Decision;
+  linkedTask: LinkedTaskRef | null;
+  supersedesTitle: string | null;
+  supersededByTitle: string | null;
+};
+
+export type DecisionRevision = {
+  id: string;
+  decisionId: string;
+  revision: number;
+  title: string;
+  problem: string;
+  context: string;
+  alternatives: string[];
+  decision: string;
+  rationale: string;
+  risks: string;
+  status: DecisionStatus;
+  supersedesId: string | null;
+  supersededById: string | null;
+  changeNote: string | null;
+  changedAt: string;
+};
+
+export type DecisionDetail = {
+  decision: DecisionView;
+  revisions: DecisionRevision[];
+};
+
+export type CreateDecisionInput = {
+  projectId: string;
+  taskId?: string | null;
+  title: string;
+  problem: string;
+  context: string;
+  alternatives: string[];
+  decision: string;
+  rationale: string;
+  risks: string;
+  supersedesId?: string | null;
+};
+
+export type UpdateDecisionInput = {
+  projectId: string;
+  decisionId: string;
+  expectedRevision: number;
+  taskId?: string | null;
+  title: string;
+  problem: string;
+  context: string;
+  alternatives: string[];
+  decision: string;
+  rationale: string;
+  risks: string;
+  supersedesId?: string | null;
+  changeNote?: string | null;
+};
+
+export type ConfirmDecisionInput = {
+  projectId: string;
+  decisionId: string;
+  expectedRevision: number;
+};
+
+export type DeprecateDecisionInput = {
+  projectId: string;
+  decisionId: string;
+  expectedRevision: number;
+  reason: string;
+};
+
+export type DecisionFilter = {
+  projectId: string;
+  status?: DecisionStatus | null;
+  taskId?: string | null;
+};
+
+export type RecoveryGitState = "available" | "unknown";
+
+export type RecoveryNextStepKind = "user_selected" | "suggested" | "needs_confirmation";
+
+export type RecoveryFreshnessState = "fresh" | "stale" | "no_snapshot";
+
+export type RecoveryProject = {
+  id: string;
+  name: string;
+  rootPath: string;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RecoveryGit = {
+  state: RecoveryGitState;
+  checkedAt: string | null;
+  branch: string | null;
+  head: string | null;
+  dirty: boolean;
+  detached: boolean;
+  unborn: boolean;
+  workspaceFingerprint: string | null;
+  fingerprintComplete: boolean;
+  changedFileCount: number;
+  note: string | null;
+};
+
+export type RecoveryTaskItem = {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  revision: number;
+  blockReason: string | null;
+  updatedAt: string;
+  requiredCount: number;
+  satisfiedRequiredCount: number;
+  blockers: string[];
+};
+
+export type RecoveryTasks = {
+  inProgress: RecoveryTaskItem[];
+  ready: RecoveryTaskItem[];
+  blocked: RecoveryTaskItem[];
+  awaitingVerification: RecoveryTaskItem[];
+  doneWithValidEvidence: RecoveryTaskItem[];
+  doneWithInvalidEvidence: RecoveryTaskItem[];
+  draftCount: number;
+};
+
+export type RecoveryVerificationItem = {
+  taskId: string;
+  taskTitle: string;
+  criterionId: string;
+  criterionDescription: string;
+  status: VerificationStatus;
+  executionStatus: string | null;
+  runId: string | null;
+  evidenceId: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  exitCode: number | null;
+  staleReason: string | null;
+  detail: string | null;
+};
+
+export type RecoveryClaude = {
+  hasActivity: boolean;
+  eventCount: number;
+  sessionCount: number;
+  lastEventAt: string | null;
+  lastEventType: string | null;
+  lastSessionRef: string | null;
+  lastSessionStartedAt: string | null;
+  lastSessionLastEventAt: string | null;
+  lastSessionEndedAt: string | null;
+  lastSessionEndReason: string | null;
+  lastSessionFailedToolCount: number;
+  lastSessionRunningToolCount: number;
+  lastSessionUnknownToolCount: number;
+  endConfirmed: boolean;
+  note: string | null;
+};
+
+export type RecoveryMemoryItem = {
+  id: string;
+  category: MemoryCategory;
+  title: string;
+  content: string;
+  sourceType: MemorySourceType;
+  confirmationStatus: MemoryConfirmationStatus;
+  revision: number;
+  updatedAt: string;
+  linkedTaskId: string | null;
+  linkedTaskTitle: string | null;
+  linkedTaskStatus: TaskStatus | null;
+  linkedTaskArchived: boolean;
+};
+
+export type RecoveryDecisionItem = {
+  id: string;
+  title: string;
+  status: DecisionStatus;
+  taskId: string | null;
+  taskTitle: string | null;
+  problem: string;
+  context: string;
+  alternatives: string[];
+  decision: string;
+  rationale: string;
+  risks: string;
+  revision: number;
+  updatedAt: string;
+  confirmedAt: string | null;
+  supersedesTitle: string | null;
+  supersededByTitle: string | null;
+};
+
+export type RecoveryDecisionNotice = {
+  id: string;
+  title: string;
+  status: DecisionStatus;
+  revision: number;
+  taskId: string | null;
+  taskTitle: string | null;
+  supersededByTitle: string | null;
+  updatedAt: string;
+  note: string;
+};
+
+export type RecoveryNextStep = {
+  kind: RecoveryNextStepKind;
+  taskId: string | null;
+  taskTitle: string | null;
+  taskStatus: TaskStatus | null;
+  draftTaskRevision?: number;
+  reason: string;
+  requiresConfirmation: boolean;
+};
+
+export type RecoveryConflict = {
+  kind: string;
+  subject: string;
+  detail: string;
+};
+
+export type RecoverySources = {
+  databaseReadAt: string;
+  gitCheckedAt: string | null;
+  taskCandidateCount: number;
+  activeTaskCount: number;
+  doneTaskCount: number;
+  draftTaskCount: number;
+  memoryConfirmedActiveCount: number;
+  memoryUnconfirmedActiveCount: number;
+  memoryArchivedCount: number;
+  decisionConfirmedCount: number;
+  decisionDraftCount: number;
+  decisionSupersededCount: number;
+  decisionDeprecatedCount: number;
+  verificationRunCount: number;
+  claudeEventCount: number;
+  claudeSessionCount: number;
+  includedLimits: string[];
+  exclusions: string[];
+};
+
+export type RecoveryPackage = {
+  project: RecoveryProject;
+  generatedAt: string;
+  fingerprint: string;
+  git: RecoveryGit;
+  tasks: RecoveryTasks;
+  verification: RecoveryVerificationItem[];
+  claude: RecoveryClaude;
+  memories: RecoveryMemoryItem[];
+  unconfirmedMemories: RecoveryMemoryItem[];
+  decisions: RecoveryDecisionItem[];
+  supersededDecisions: RecoveryDecisionNotice[];
+  nextStep: RecoveryNextStep;
+  filesToRead: string[];
+  conflicts: RecoveryConflict[];
+  missingInformation: string[];
+  sources: RecoverySources;
+};
+
+export type RecoverySnapshot = {
+  id: string;
+  projectId: string;
+  generatedAt: string;
+  fingerprint: string;
+  markdown: string;
+  package: RecoveryPackage;
+  taskCount: number;
+  memoryCount: number;
+  decisionCount: number;
+};
+
+export type RecoverySnapshotSummary = {
+  id: string;
+  projectId: string;
+  generatedAt: string;
+  fingerprint: string;
+  taskCount: number;
+  memoryCount: number;
+  decisionCount: number;
+};
+
+export type RecoveryFreshness = {
+  state: RecoveryFreshnessState;
+  checkedAt: string;
+  changed: string[];
+};
+
+export type RecoveryOverview = {
+  latest: RecoverySnapshot | null;
+  freshness: RecoveryFreshness;
+};
+
+export type RecoveryPreference = {
+  projectId: string;
+  nextTaskId: string | null;
+  updatedAt: string;
+};
+
+export type SetNextTaskInput = {
+  projectId: string;
+  taskId: string | null;
+};

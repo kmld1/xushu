@@ -39,6 +39,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0005_claude_capture_boundary",
         sql: include_str!("../../migrations/0005_claude_capture_boundary.sql"),
     },
+    Migration {
+        version: 6,
+        name: "0006_project_memory_and_recovery",
+        sql: include_str!("../../migrations/0006_project_memory_and_recovery.sql"),
+    },
 ];
 
 /// 一次迁移执行的结果。

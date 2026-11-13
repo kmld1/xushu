@@ -1,7 +1,7 @@
 # XUSHU UI Audit
 
 > **VISUAL_REVIEW_PENDING**。Phase 4.2 已完成程序化与真实数据 UI 复核。当前待验收的人工视觉、原生窗口行为和辅助技术清单见 [Phase 4 收尾审计第 5 节](../phases/PHASE_4_CLOSEOUT_AUDIT.md#5-人工视觉与原生行为)。已执行范围见 [Phase 4.2 验收报告](../phases/PHASE_4_2_FINAL_AUDIT.md)。
-> 关联规范：`docs/design/DESIGN_SYSTEM.md`（v2.1 / Phase 3.6）
+> 关联规范：`docs/design/DESIGN_SYSTEM.md`（v2.3 / Phase 5）
 > 关联报告：`docs/design/UI_REDESIGN_PHASE_3_6.md`
 > 窗口决策：`docs/architecture/ADR/0006-custom-titlebar-window-chrome.md`（取代 ADR-0005）
 > 更新规则：每次新增或修改页面前阅读设计系统；完成后更新本文件。
@@ -17,6 +17,8 @@
 | 任务 Tasks | `/tasks` | Phase 3.6 精修 | 保留筛选/操作；状态统一为图标 + 中文 + 颜色的行内形式 | PASS（Vitest + 布局测量） | PENDING |
 | 任务详情 Task Detail | `/tasks/:id` | 保留 + 响应式修复 | StateTrack、目标/验收/历史、门禁侧栏；栅格 `min-w-0` | PASS（Vitest + 桌面 E2E + 布局测量） | PENDING |
 | 验收中心 Verification | `/verification` | Phase 3.6 调整 | 无独立页头；导出在证据工作区标题行；队列 + 证据工作区 | PASS（Vitest + 桌面 E2E + 布局测量） | PENDING |
+| 项目记忆与决策 Knowledge | `/projects/:id/knowledge` | Phase 5 新增 | PageHeader、记忆/决策 Tabs、日志式行、详情 Sheet、编辑 Dialog、任务筛选条 | PASS（Vitest + 桌面 E2E 文本可见） | PENDING |
+| 恢复 Recovery | `/recovery` | Phase 5 新增 | 恢复带、Focus Panel 下一步、双列摘要、完整指令/历史 Sheet、来源 details | PASS（Vitest + 桌面 E2E） | PENDING |
 | 本地数据与健康 | `/diagnostics` | Phase 3.6 调整 | 无独立页头；系统健康、探针说明、表单/记录两栏 | PASS（Vitest + 布局测量） | PENDING |
 | 设置 Settings | `/settings` | Phase 3.6 调整 | 无独立页头；分组行式设置、主题 radio、关于/数据 | PASS（Vitest + 布局测量） | PENDING |
 | 404 | `*` | 保留 | 居中空状态；顶部工作带显示“未找到” | PASS（布局测量） | PENDING |
@@ -48,6 +50,13 @@
 | CommandBlock | `src/features/verification/command-block.tsx` | 任务详情、验收中心、批准 Dialog | 使用 |
 | CriterionVerification | `src/features/verification/criterion-verification.tsx` | 任务详情、验收中心 | 使用 |
 | SystemHealthCard | `src/features/system/system-health-card.tsx` | 工作台侧栏、诊断 | 使用 |
+| MemoryConfirmationBadge / MemoryArchivedBadge | `src/features/knowledge/knowledge-badges.tsx` | 项目知识页、项目/任务详情 | 新增：图标 + 中文 + 语义色 |
+| DecisionStatusBadge | `src/features/knowledge/knowledge-badges.tsx` | 项目知识页、恢复页、项目/任务详情 | 新增：草稿/已确认/已被取代/已废弃 |
+| MemoryDetailSheet / DecisionDetailSheet | `src/features/knowledge/*-detail-sheet.tsx` | 项目知识页 | 新增：760px Sheet、修订历史、状态操作 |
+| MemoryFormDialog / DecisionFormDialog | `src/features/knowledge/*-form-dialog.tsx` | 项目知识页 | 新增：RHF + Zod、类别/状态、关联任务、取代选择 |
+| RecoveryFreshnessBadge / NextStepKindBadge / RecoveryGitBadge | `src/features/recovery/recovery-badges.tsx` | 恢复页、指令 Sheet | 新增：当前/过期/未生成、用户指定/建议/需确认、Git 可用性 |
+| RecoveryInstructionsSheet | `src/features/recovery/recovery-instructions-sheet.tsx` | 恢复页 | 新增：完整指令预览、边界提示、深色 Markdown、复制 |
+| RecoveryHistorySheet | `src/features/recovery/recovery-history-sheet.tsx` | 恢复页 | 新增：最近 20 份快照、当前/历史、加载态 |
 
 ## 3. 状态表达检查
 
@@ -362,3 +371,90 @@
 - 人工视觉复核：**PENDING**
 - 真实 Claude Code 联调：**NOT_RUN**（需用户授权的测试项目，步骤见 `docs/architecture/CLAUDE_HOOKS.md` 第 8 节）
 - 最终 UI 状态：**VISUAL_REVIEW_PENDING**
+
+## 14. Phase 5 记忆、决策与恢复 UI 审计（2026-11-12）
+
+### 14.1 范围与设计自检
+
+- 已实际调用 `frontend-design` Skill（当前主会话，2026-11-12），未使用子 Agent，未自动截图/录屏。
+- 复用 `docs/design/DESIGN_SYSTEM.md` v2.3 的 `workspace`/`sidebar`/`line`/`primary`/`warning`/`success`/`destructive`/`info`/`code-*` Tokens；未新增全局配色或字体。
+- 保持 44px 顶部工作带、240/52px 侧栏、自定义窗口控制与 Snap Overlay；新增一级“恢复”导航与项目详情子页面“记忆与决策”。
+- 设计方向：记忆/决策是“开发上下文日志”，不是 KPI 或卡片墙；恢复页是“可信交接带”，识别点是来源指纹、新鲜度与下一步，而不是装饰。
+- 恢复包明确区分事实/记忆/决策/建议；过期与历史快照均有警告；复制入口不自动执行。
+
+### 14.2 新增页面与组件
+
+| 页面/组件 | 说明 | 自动化 | 人工视觉 |
+|---|---|---|---|
+| 项目记忆与决策 `/projects/:id/knowledge` | Tabs、类别/状态筛选、包含归档、日志行、关联任务筛选条 | PASS（Vitest + 桌面 E2E 文本可见） | PENDING |
+| 记忆详情/编辑 | 760px Sheet、修订历史、确认/归档/恢复；Dialog 表单 | PASS（Vitest 打开详情 + 创建记忆） | PENDING |
+| 决策详情/编辑/取代 | Sheet 展示问题/背景/备选/最终方案/理由/风险；草稿编辑、确认、废弃、创建取代 | PASS（Vitest 详情/创建草稿 + Rust 决策测试） | PENDING |
+| 恢复 `/recovery` | 恢复带、下一步 Focus Panel、双列摘要、来源 details | PASS（Vitest + 桌面 E2E） | PENDING |
+| 完整恢复指令 Sheet | 边界提示、深色 Markdown、复制、过期/历史警告 | PASS（Vitest 剪贴板 + 历史快照） | PENDING |
+| 历史快照 Sheet | 最近 20 份、当前/历史、查看加载态 | PASS（Vitest） | PENDING |
+| 项目详情“项目记忆与决策”strip | 计数 + 最近记忆/决策 + 入口 | PASS（Vitest 项目详情回归） | PENDING |
+| 任务详情“相关决策与记忆” | 最多 3 条记忆/决策 + 项目上下文入口 | PASS（Vitest 任务详情回归） | PENDING |
+
+### 14.3 状态表达检查
+
+- [x] 记忆确认/未确认/归档使用图标 + 中文 + 颜色。
+- [x] 决策草稿/已确认/已被取代/已废弃使用图标 + 中文 + 颜色。
+- [x] 未确认记忆与已确认记忆分开展示，明确“不是事实”。
+- [x] 草稿决策明确“不会进入恢复包”；已被取代/废弃决策不作为当前约束。
+- [x] 恢复快照当前/过期/未生成使用 Badge；过期时列出变化来源。
+- [x] 历史快照明确“不代表当前状态”；复制历史/过期快照时剪贴板文本带警告。
+- [x] 验证结果写“按生成时状态”，不把过期结果写成“当前测试通过”。
+- [x] 记忆/决策/Hook 事件不显示为验收证据；完成门禁不变。
+- [x] 无快照时使用 plain EmptyState，不构造演示恢复内容。
+- [x] 复制恢复指令是用户主动点击，不自动注入 Claude Code。
+
+### 14.4 无障碍与布局检查（代码/桌面）
+
+- [x] 记忆/决策行标题是按钮，可键盘打开详情；详情 Sheet 使用 Radix 焦点陷阱与 Escape。
+- [x] 详情 Sheet Footer 使用 `flex-wrap`，窄窗口操作按钮不隐藏、不溢出。
+- [x] Dialog 使用 RHF + Zod，Label 关联、`aria-invalid`、字段错误 `role="alert"`。
+- [x] 恢复页“下一步”区域有 `aria-label="下一步"`；任务选择有可访问名称。
+- [x] 恢复页按钮在 500px 下换行；500×480、1366×768、1600×900 共 9 组布局测量无页面/主区横向溢出，工作带 44px，侧栏 52/240px。
+- [x] 数据来源使用 `<details>`，summary 有可见焦点环。
+- [x] 历史快照查看显示 `Loader2` 加载态，不显示伪造结果。
+- [ ] 浅色/深色截图复核知识页、恢复页、Dialog/Sheet、长文本与窄窗：待用户提供。
+- [ ] 真实键盘 Tab 顺序、焦点返回与 500×480 实际窗口：待人工复核。
+- [ ] 1366×768、1600×900 下恢复页双列与知识页长内容：程序化布局测量通过，待人工截图复核视觉层级。
+
+### 14.5 当前自动化与桌面结果
+
+| 命令 | 退出码 | 结果 |
+|---|---|---|
+| `pnpm typecheck` | 0 | `tsc --noEmit` 通过 |
+| `pnpm lint` | 0 | ESLint 10，`--max-warnings 0` |
+| `pnpm test` | 0 | 9 个测试文件、66 个测试通过（Phase 5 新增 12 个测试） |
+| `pnpm build` | 0 | Vite 通过；JS 917.84 kB / gzip 266.03 kB（原有 >500 kB 提示） |
+| `pnpm format` | 0 | Prettier 通过 |
+| `cargo fmt --all -- --check` | 0 | rustfmt 通过 |
+| `cargo check --workspace --all-targets --locked` | 0 | Rust workspace 通过 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | 0 | 无警告 |
+| `cargo test --workspace --locked` | 0 | 152 项通过（含 30 项 Phase 5 新增领域/恢复/迁移/重启测试） |
+| 隔离桌面 E2E | 0 | 记忆/决策/快照 IPC、详情 Sheet、fresh → stale → fresh、任务状态不变、知识页/恢复页文本可见；正常数据库指纹不变 |
+| 隔离桌面布局测量 | 0 | 500×480、1366×768、1600×900 × 知识页/恢复页共 9 组；工作带 44px、侧栏 52/240px、无页面/主区横向溢出 |
+
+> E2E 证据：`target/phase5-audit/phase5-e2e-result.json`、`target/phase5-audit/phase5-layout.json`（已忽略目录）。未自动截图/录屏。
+
+### 14.6 待人工视觉复核
+
+1. 项目详情“项目记忆与决策”strip 与既有 Claude 接入 strip 的层级是否清晰。
+2. 知识页记忆/决策 Tabs、筛选工具栏、日志行密度、Badge 与关联任务。
+3. 记忆/决策详情 Sheet 与编辑 Dialog：长文本、滚动、Footer 换行、焦点返回。
+4. 决策取代流程：草稿选择“取代已确认决策”、确认后的双向提示。
+5. 恢复页恢复带、下一步 Focus Panel、双列摘要、来源 details。
+6. 完整恢复指令 Sheet：深色 Markdown、过期/历史警告、复制按钮。
+7. 历史快照 Sheet：当前/历史标记、加载态、关闭焦点。
+8. 500×480、1366×768、1600×900、深浅主题、150% 缩放下的实际窗口截图。
+9. 键盘：Tab 到新建/查看/确认/复制/历史、Escape 关闭、焦点返回。
+
+### 14.7 结论
+
+- 自动化与技术检查：**PASS**
+- 隔离桌面 E2E（已测项）：**PASS**
+- 人工视觉复核：**PENDING**
+- 最终 UI 状态：**VISUAL_REVIEW_PENDING**
+- 未获得用户截图前，不得声称 Phase 5 UI 已通过人工视觉验收。

@@ -36,6 +36,13 @@ impl ApiError {
             }
             CoreError::Verification(message) => Self::new("VERIFICATION_ERROR", message),
             CoreError::Claude(message) => Self::new("CLAUDE_INTEGRATION_ERROR", message),
+            CoreError::Recovery(_) => {
+                eprintln!("[xushu] recovery error: code={code}");
+                Self::new(
+                    "RECOVERY_ERROR",
+                    "恢复上下文生成或读取失败，请重新生成后重试",
+                )
+            }
             CoreError::Unavailable => Self::new("DATABASE_UNAVAILABLE", "本地数据库尚未就绪"),
             CoreError::LockPoisoned => {
                 Self::new("DATABASE_LOCK_ERROR", "本地数据库连接暂时不可用，请重试")

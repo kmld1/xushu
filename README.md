@@ -10,6 +10,8 @@ XUSHU 不替代 Claude Code、编辑器或终端，也不把 AI 的“已完成�
 
 ## 当前状态
 
+**Phase 5（长期记忆、开发决策与跨会话恢复）：代码、迁移、自动化与隔离桌面 E2E PASS；人工视觉与产品化验收 PENDING（2026-11-12）。** [Phase 5 报告](docs/phases/PHASE_5_REPORT.md) · [ADR-0008](docs/architecture/ADR/0008-project-memory-decisions-recovery.md)
+
 **Phase 4（Claude Code Hooks 接入）：Windows 六种真实 Hooks 联调、已测功能和 E2E 数据隔离 PASS。Phase 4.3 补齐撤销采集与目录校验回归，整体验收仍为 PENDING。** [Phase 4.3 安全可靠性收尾](docs/phases/PHASE_4_3_SECURITY_CLOSEOUT.md)
 
 **Phase 3（独立验收引擎）：PASS（2026-11-06）。**
@@ -51,9 +53,19 @@ XUSHU 不替代 Claude Code、编辑器或终端，也不把 AI 的“已完成�
 - 停用/卸载可逆，只删除 XUSHU 自己创建的条目；配置异常、路径重定向、外部修改与接收器更新可检测并提示修复；
 - Hook 事件与任务完成门禁物理隔离；`Stop`、`PostToolUse` 成功都不等于验收通过。
 
-**Phase 4 待验收项**包括用户实机视觉与原生窗口行为、新构建的手动 Claude Code 联调，以及生产安装包 sidecar 与其他平台验证。
+**Phase 5 已完成的技术能力：**
 
-详见 [`docs/phases/PHASE_4_REPORT.md`](docs/phases/PHASE_4_REPORT.md)、[`docs/phases/PHASE_3_REPORT.md`](docs/phases/PHASE_3_REPORT.md)、[`docs/design/UI_REDESIGN_PHASE_3_5.md`](docs/design/UI_REDESIGN_PHASE_3_5.md) 与 [`docs/design/UI_REDESIGN_PHASE_3_6.md`](docs/design/UI_REDESIGN_PHASE_3_6.md)。
+- 项目长期记忆：目标、约束、架构、规范、事实、风险、后续事项与项目知识；来源、确认状态、有效性、任务/证据关联与完整修订历史；
+- 开发决策：草稿 → 已确认 → 已被取代/已废弃；已确认决策不可原地改写，取代关系双向可追溯，历史不被覆盖；
+- 确定性跨会话恢复包：项目/Git/任务/阻塞/验收 blockers/独立验证/Claude 元数据/已确认记忆与决策/下一步/待读文件/冲突与缺失信息；
+- 快照指纹与当前/过期判定；历史快照保留最近 20 份；过期或历史快照复制时明确添加警告；
+- 项目记忆与决策页面、项目详情摘要、任务详情关联、一级“恢复”页面；恢复指令预览与用户主动复制；
+- 迁移 6 纯追加表，旧 Phase 4 数据保留；记忆/决策/快照事务与项目隔离；重启后数据与快照一致；
+- 恢复包不依赖 AI，不读取 transcript/Prompt/工具输出，不扫描项目文件内容。
+
+**Phase 5 待验收项**：知识页/恢复页的浅色与深色人工视觉、500×480/1366×768/1600×900 实际截图、长文本与窄窗交互、键盘焦点；生产安装包与跨平台验证仍待后续阶段。
+
+详见 [`docs/phases/PHASE_5_REPORT.md`](docs/phases/PHASE_5_REPORT.md)、[`docs/phases/PHASE_4_REPORT.md`](docs/phases/PHASE_4_REPORT.md)、[`docs/phases/PHASE_3_REPORT.md`](docs/phases/PHASE_3_REPORT.md)、[`docs/design/UI_REDESIGN_PHASE_3_5.md`](docs/design/UI_REDESIGN_PHASE_3_5.md) 与 [`docs/design/UI_REDESIGN_PHASE_3_6.md`](docs/design/UI_REDESIGN_PHASE_3_6.md)。
 
 ## 冻结技术栈
 

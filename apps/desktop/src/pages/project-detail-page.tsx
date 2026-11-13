@@ -10,6 +10,7 @@ import { Section, SectionHeader } from "@/components/section";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ClaudeIntegrationSection } from "@/features/claude/claude-integration-section";
+import { ProjectKnowledgeSection } from "@/features/knowledge/project-knowledge-section";
 import { ProjectActionsMenu } from "@/features/projects/project-actions-menu";
 import { ProjectGitSummary } from "@/features/projects/project-git-summary";
 import { useProject, useProjects } from "@/features/projects/queries";
@@ -127,6 +128,8 @@ export function ProjectDetailPage() {
       </div>
 
       <ClaudeIntegrationSection project={current} archived={archived} />
+
+      <ProjectKnowledgeSection project={current} archived={archived} />
 
       <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_280px]">
         <Section className="min-w-0">

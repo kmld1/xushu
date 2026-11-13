@@ -6,11 +6,14 @@
 pub mod claude;
 pub mod code_state;
 pub mod db;
+pub mod decision;
 pub mod error;
 pub mod git;
+pub mod memory;
 pub mod models;
 pub mod probe;
 pub mod project;
+pub mod recovery;
 pub mod redaction;
 pub mod runner;
 pub mod state_machine;
@@ -26,11 +29,29 @@ pub use claude::{
 };
 pub use code_state::CodeState;
 pub use db::{run_migrations, Database, DatabaseHealth, Migration, MigrationReport, MIGRATIONS};
+pub use decision::{
+    ConfirmDecisionInput, CreateDecisionInput, Decision, DecisionDetail, DecisionFilter,
+    DecisionRevision, DecisionService, DecisionStatus, DecisionView, DeprecateDecisionInput,
+    UpdateDecisionInput,
+};
 pub use error::CoreError;
 pub use git::GitStatus;
+pub use memory::{
+    ArchiveMemoryInput, ConfirmMemoryInput, CreateMemoryInput, LinkedTaskRef, MemoryCategory,
+    MemoryConfirmationStatus, MemoryDetail, MemoryFilter, MemoryService, MemorySourceType,
+    MemoryValidityStatus, ProjectMemory, ProjectMemoryRevision, ProjectMemoryView,
+    UpdateMemoryInput,
+};
 pub use models::*;
 pub use probe::{parse_created_at, CreateProbeInput, ProbeRecord};
 pub use project::ProjectService;
+pub use recovery::{
+    RecoveryClaude, RecoveryConflict, RecoveryDecisionItem, RecoveryDecisionNotice,
+    RecoveryFreshness, RecoveryFreshnessState, RecoveryGit, RecoveryGitState, RecoveryMemoryItem,
+    RecoveryNextStep, RecoveryNextStepKind, RecoveryOverview, RecoveryPackage, RecoveryPreference,
+    RecoveryProject, RecoveryService, RecoverySnapshot, RecoverySnapshotSummary, RecoverySources,
+    RecoveryTaskItem, RecoveryTasks, RecoveryVerificationItem, SetNextTaskInput,
+};
 pub use runner::{ExecutionStatus, RunControl, RunOutcome, RunPlan};
 pub use task::TaskService;
 pub use verification::{

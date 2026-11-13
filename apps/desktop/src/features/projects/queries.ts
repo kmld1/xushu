@@ -63,7 +63,10 @@ export function useUpdateProject() {
   return useMutation({
     mutationFn: updateProject,
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: projectQueryKeys.all });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: projectQueryKeys.all }),
+        queryClient.invalidateQueries({ queryKey: ["recovery"] }),
+      ]);
     },
   });
 }
@@ -78,6 +81,7 @@ export function useArchiveProject() {
         queryClient.invalidateQueries({ queryKey: projectQueryKeys.all }),
         queryClient.invalidateQueries({ queryKey: ["tasks"] }),
         queryClient.invalidateQueries({ queryKey: ["workspace"] }),
+        queryClient.invalidateQueries({ queryKey: ["recovery"] }),
       ]);
     },
   });
@@ -93,6 +97,7 @@ export function useRestoreProject() {
         queryClient.invalidateQueries({ queryKey: projectQueryKeys.all }),
         queryClient.invalidateQueries({ queryKey: ["tasks"] }),
         queryClient.invalidateQueries({ queryKey: ["workspace"] }),
+        queryClient.invalidateQueries({ queryKey: ["recovery"] }),
       ]);
     },
   });

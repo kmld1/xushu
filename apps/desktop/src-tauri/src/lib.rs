@@ -2,6 +2,8 @@ mod business_commands;
 mod claude_commands;
 mod commands;
 mod error;
+mod knowledge_commands;
+mod recovery_commands;
 mod state;
 mod window_chrome;
 
@@ -84,6 +86,24 @@ pub fn run() {
             claude_commands::disable_claude_hooks,
             claude_commands::uninstall_claude_hooks,
             claude_commands::refresh_claude_events,
+            knowledge_commands::list_project_memories,
+            knowledge_commands::get_project_memory,
+            knowledge_commands::create_project_memory,
+            knowledge_commands::update_project_memory,
+            knowledge_commands::confirm_project_memory,
+            knowledge_commands::archive_project_memory,
+            knowledge_commands::restore_project_memory,
+            knowledge_commands::list_project_decisions,
+            knowledge_commands::get_project_decision,
+            knowledge_commands::create_project_decision,
+            knowledge_commands::update_project_decision,
+            knowledge_commands::confirm_project_decision,
+            knowledge_commands::deprecate_project_decision,
+            recovery_commands::get_recovery_overview,
+            recovery_commands::generate_recovery_package,
+            recovery_commands::list_recovery_snapshots,
+            recovery_commands::get_recovery_snapshot,
+            recovery_commands::set_recovery_next_task,
         ])
         .run(tauri::generate_context!())
         .expect("运行序枢 XUSHU 桌面程序失败");

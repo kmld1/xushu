@@ -1,6 +1,7 @@
 import {
   Database,
   FolderGit2,
+  History,
   LayoutDashboard,
   ListChecks,
   Settings,
@@ -24,6 +25,7 @@ const navigation = [
     end: false,
     badge: "awaiting",
   },
+  { to: "/recovery", label: "恢复", icon: History, end: false, badge: null },
   { to: "/diagnostics", label: "诊断", icon: Database, end: false, badge: null },
   { to: "/settings", label: "设置", icon: Settings, end: false, badge: null },
 ] as const;
@@ -130,7 +132,7 @@ export function AppLayout() {
                 {appInfo.isPending ? "…" : appInfo.data ? `v${appInfo.data.version}` : "—"}
               </span>
             </div>
-            <p className="mt-0.5 text-[10px] text-muted-foreground/80">Phase 4 · Claude Hooks</p>
+            <p className="mt-0.5 text-[10px] text-muted-foreground/80">Phase 5 · 记忆与恢复</p>
           </div>
         </aside>
 

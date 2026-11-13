@@ -1,15 +1,23 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import type {
   AcceptanceCriterion,
   ClaudeActivitySnapshot,
   ClaudeHookPreview,
   ClaudeIntegrationStatus,
+  DecisionDetail,
+  DecisionView,
+  MemoryDetail,
   Project,
   ProjectGitStatus,
+  ProjectMemoryView,
+  RecoveryOverview,
+  RecoveryPreference,
+  RecoverySnapshot,
+  RecoverySnapshotSummary,
   Task,
   TaskDetail,
   WorkspaceSummary,
@@ -29,7 +37,7 @@ const appInfo = {
   name: "序枢 XUSHU",
   version: "0.1.0",
   tauriVersion: "2.12.5",
-  phase: "Phase 4",
+  phase: "Phase 5",
   platform: "windows",
 };
 
@@ -39,7 +47,7 @@ const health = {
   foreignKeysEnabled: true,
   foreignKeyViolations: false,
   journalMode: "wal",
-  schemaVersion: 4,
+  schemaVersion: 6,
   recordCount: 0,
   databaseFile: "xushu.db",
 };
@@ -170,6 +178,327 @@ const claudePreview: ClaudeHookPreview = {
   blockedReason: null,
 };
 
+const memoryView: ProjectMemoryView = {
+  memory: {
+    id: "88888888-8888-4888-8888-888888888888",
+    projectId: project.id,
+    category: "constraint",
+    title: "必须由用户授权提交",
+    content: "任何 Git 写入都必须由用户确认。",
+    sourceType: "user",
+    confirmationStatus: "confirmed",
+    validityStatus: "active",
+    linkedTaskId: task.id,
+    linkedEvidenceId: null,
+    revision: 1,
+    createdAt: "2026-11-06T08:00:00.000Z",
+    updatedAt: "2026-11-06T08:00:00.000Z",
+    confirmedAt: "2026-11-06T08:00:00.000Z",
+    archivedAt: null,
+  },
+  linkedTask: {
+    id: task.id,
+    title: task.title,
+    status: task.status,
+    archived: false,
+  },
+};
+
+const memoryDetail: MemoryDetail = {
+  memory: memoryView,
+  revisions: [
+    {
+      id: "99999999-9999-4999-8999-999999999999",
+      memoryId: memoryView.memory.id,
+      revision: 1,
+      category: memoryView.memory.category,
+      title: memoryView.memory.title,
+      content: memoryView.memory.content,
+      sourceType: memoryView.memory.sourceType,
+      confirmationStatus: memoryView.memory.confirmationStatus,
+      validityStatus: memoryView.memory.validityStatus,
+      linkedTaskId: task.id,
+      linkedEvidenceId: null,
+      changeNote: "创建",
+      changedAt: memoryView.memory.createdAt,
+    },
+  ],
+};
+
+const confirmedDecision: DecisionView = {
+  decision: {
+    id: "66666666-6666-4666-8666-666666666666",
+    projectId: project.id,
+    taskId: task.id,
+    title: "选择 SQLite",
+    problem: "需要选择本地持久化方案",
+    context: "本地优先，不引入云服务",
+    alternatives: ["SQLite", "JSON 文件"],
+    decision: "使用 SQLite",
+    rationale: "事务与约束更可靠",
+    risks: "需要维护迁移",
+    status: "confirmed",
+    supersedesId: null,
+    supersededById: null,
+    revision: 2,
+    createdAt: "2026-11-06T08:00:00.000Z",
+    updatedAt: "2026-11-06T09:00:00.000Z",
+    confirmedAt: "2026-11-06T09:00:00.000Z",
+    deprecatedAt: null,
+  },
+  linkedTask: {
+    id: task.id,
+    title: task.title,
+    status: task.status,
+    archived: false,
+  },
+  supersedesTitle: null,
+  supersededByTitle: null,
+};
+
+const draftDecision: DecisionView = {
+  decision: {
+    ...confirmedDecision.decision,
+    id: "77777777-7777-4777-8777-777777777777",
+    title: "草稿决策",
+    decision: "尚未决定",
+    taskId: null,
+    status: "draft",
+    revision: 1,
+    createdAt: "2026-11-07T08:00:00.000Z",
+    updatedAt: "2026-11-07T08:00:00.000Z",
+    confirmedAt: null,
+  },
+  linkedTask: null,
+  supersedesTitle: null,
+  supersededByTitle: null,
+};
+
+const decisionDetail: DecisionDetail = {
+  decision: confirmedDecision,
+  revisions: [
+    {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      decisionId: confirmedDecision.decision.id,
+      revision: 1,
+      title: confirmedDecision.decision.title,
+      problem: confirmedDecision.decision.problem,
+      context: confirmedDecision.decision.context,
+      alternatives: confirmedDecision.decision.alternatives,
+      decision: confirmedDecision.decision.decision,
+      rationale: confirmedDecision.decision.rationale,
+      risks: confirmedDecision.decision.risks,
+      status: "draft",
+      supersedesId: null,
+      supersededById: null,
+      changeNote: "创建",
+      changedAt: confirmedDecision.decision.createdAt,
+    },
+    {
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      decisionId: confirmedDecision.decision.id,
+      revision: 2,
+      title: confirmedDecision.decision.title,
+      problem: confirmedDecision.decision.problem,
+      context: confirmedDecision.decision.context,
+      alternatives: confirmedDecision.decision.alternatives,
+      decision: confirmedDecision.decision.decision,
+      rationale: confirmedDecision.decision.rationale,
+      risks: confirmedDecision.decision.risks,
+      status: "confirmed",
+      supersedesId: null,
+      supersededById: null,
+      changeNote: "确认决策",
+      changedAt: confirmedDecision.decision.confirmedAt ?? confirmedDecision.decision.updatedAt,
+    },
+  ],
+};
+
+function makeRecoverySnapshot(): RecoverySnapshot {
+  const generatedAt = "2026-11-12T10:00:00.000Z";
+  const fingerprint = "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+  return {
+    id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    projectId: project.id,
+    generatedAt,
+    fingerprint,
+    markdown: [
+      "# XUSHU 恢复上下文 — 示例项目",
+      "",
+      "生成时间（UTC）：2026-11-12T10:00:00.000Z",
+      "",
+      "## 下一步",
+      "",
+      "- 来源：系统建议（需人工确认）",
+      "- 依据：人工验收条件尚未确认：人工确认导入结果",
+    ].join("\n"),
+    taskCount: 1,
+    memoryCount: 1,
+    decisionCount: 1,
+    package: {
+      project: {
+        id: project.id,
+        name: project.name,
+        rootPath: project.rootPath,
+        archived: false,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      },
+      generatedAt,
+      fingerprint,
+      git: {
+        state: "available",
+        checkedAt: generatedAt,
+        branch: "main",
+        head: gitStatus.head,
+        dirty: false,
+        detached: false,
+        unborn: false,
+        workspaceFingerprint:
+          "sha256:feedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface",
+        fingerprintComplete: true,
+        changedFileCount: 0,
+        note: null,
+      },
+      tasks: {
+        inProgress: [],
+        ready: [],
+        blocked: [],
+        awaitingVerification: [
+          {
+            id: task.id,
+            title: task.title,
+            status: "awaiting_verification",
+            priority: "high",
+            revision: 3,
+            blockReason: null,
+            updatedAt: task.updatedAt,
+            requiredCount: 1,
+            satisfiedRequiredCount: 0,
+            blockers: ["人工验收条件尚未确认：人工确认导入结果"],
+          },
+        ],
+        doneWithValidEvidence: [],
+        doneWithInvalidEvidence: [],
+        draftCount: 0,
+      },
+      verification: [],
+      claude: {
+        hasActivity: false,
+        eventCount: 0,
+        sessionCount: 0,
+        lastEventAt: null,
+        lastEventType: null,
+        lastSessionRef: null,
+        lastSessionStartedAt: null,
+        lastSessionLastEventAt: null,
+        lastSessionEndedAt: null,
+        lastSessionEndReason: null,
+        lastSessionFailedToolCount: 0,
+        lastSessionRunningToolCount: 0,
+        lastSessionUnknownToolCount: 0,
+        endConfirmed: false,
+        note: "尚无已导入的 Claude Code 事件；未见失败事件不代表成功。",
+      },
+      memories: [
+        {
+          id: memoryView.memory.id,
+          category: "constraint",
+          title: memoryView.memory.title,
+          content: memoryView.memory.content,
+          sourceType: "user",
+          confirmationStatus: "confirmed",
+          revision: 1,
+          updatedAt: memoryView.memory.updatedAt,
+          linkedTaskId: task.id,
+          linkedTaskTitle: task.title,
+          linkedTaskStatus: task.status,
+          linkedTaskArchived: false,
+        },
+      ],
+      unconfirmedMemories: [],
+      decisions: [
+        {
+          id: confirmedDecision.decision.id,
+          title: confirmedDecision.decision.title,
+          status: "confirmed",
+          taskId: task.id,
+          taskTitle: task.title,
+          problem: confirmedDecision.decision.problem,
+          context: confirmedDecision.decision.context,
+          alternatives: confirmedDecision.decision.alternatives,
+          decision: confirmedDecision.decision.decision,
+          rationale: confirmedDecision.decision.rationale,
+          risks: confirmedDecision.decision.risks,
+          revision: 2,
+          updatedAt: confirmedDecision.decision.updatedAt,
+          confirmedAt: confirmedDecision.decision.confirmedAt,
+          supersedesTitle: null,
+          supersededByTitle: null,
+        },
+      ],
+      supersededDecisions: [],
+      nextStep: {
+        kind: "suggested",
+        taskId: task.id,
+        taskTitle: task.title,
+        taskStatus: "awaiting_verification",
+        reason: "任务等待验收：人工验收条件尚未确认：人工确认导入结果",
+        requiresConfirmation: true,
+      },
+      filesToRead: ["README.md"],
+      conflicts: [],
+      missingInformation: ["尚无独立验证运行记录；任何完成声明都需要证据。"],
+      sources: {
+        databaseReadAt: generatedAt,
+        gitCheckedAt: generatedAt,
+        taskCandidateCount: 1,
+        activeTaskCount: 1,
+        doneTaskCount: 0,
+        draftTaskCount: 0,
+        memoryConfirmedActiveCount: 1,
+        memoryUnconfirmedActiveCount: 0,
+        memoryArchivedCount: 0,
+        decisionConfirmedCount: 1,
+        decisionDraftCount: 0,
+        decisionSupersededCount: 0,
+        decisionDeprecatedCount: 0,
+        verificationRunCount: 0,
+        claudeEventCount: 0,
+        claudeSessionCount: 0,
+        includedLimits: ["任务：最近更新最多 200 条。"],
+        exclusions: [
+          "未导入的 Claude Code 本地收件箱事件不在恢复包内。",
+          "不包含原始 Hook JSON、Prompt、工具输入输出、transcript 或密钥。",
+        ],
+      },
+    },
+  };
+}
+
+function makeRecoveryOverview(
+  state: "fresh" | "stale" | "no_snapshot" = "fresh",
+): RecoveryOverview {
+  if (state === "no_snapshot") {
+    return {
+      latest: null,
+      freshness: {
+        state: "no_snapshot",
+        checkedAt: "2026-11-12T10:00:00.000Z",
+        changed: [],
+      },
+    };
+  }
+  return {
+    latest: makeRecoverySnapshot(),
+    freshness: {
+      state,
+      checkedAt: "2026-11-12T11:00:00.000Z",
+      changed: state === "stale" ? ["Git 状态或工作区指纹已变化"] : [],
+    },
+  };
+}
+
 const emptySummary: WorkspaceSummary = {
   projectCount: 0,
   archivedProjectCount: 0,
@@ -205,11 +534,15 @@ function mockBackend({
   failHealth = false,
   tasks = [task],
   details = [taskDetail],
+  recoveryState = "fresh",
+  readRecoveryOverview = () => makeRecoveryOverview(recoveryState),
 }: {
   withProject?: boolean;
   failHealth?: boolean;
   tasks?: Task[];
   details?: TaskDetail[];
+  recoveryState?: "fresh" | "stale" | "no_snapshot";
+  readRecoveryOverview?: () => RecoveryOverview;
 } = {}) {
   invokeMock.mockImplementation(async (command, args) => {
     switch (command) {
@@ -262,6 +595,149 @@ function mockBackend({
           remaining: 0,
           lastErrorCode: null,
         };
+      case "list_project_memories": {
+        if (!withProject) {
+          return [];
+        }
+        const filter = (args?.filter ?? {}) as {
+          category?: string | null;
+          includeArchived?: boolean | null;
+          taskId?: string | null;
+        };
+        if (filter.category && filter.category !== memoryView.memory.category) {
+          return [];
+        }
+        if (filter.taskId && filter.taskId !== memoryView.memory.linkedTaskId) {
+          return [];
+        }
+        return [memoryView];
+      }
+      case "get_project_memory":
+        if (args?.memoryId === memoryView.memory.id) {
+          return memoryDetail;
+        }
+        throw { code: "NOT_FOUND", message: "未找到指定记录" };
+      case "create_project_memory": {
+        const input = (args?.input ?? {}) as {
+          title?: string;
+          content?: string;
+          category?: ProjectMemoryView["memory"]["category"];
+          linkedTaskId?: string | null;
+        };
+        return {
+          memory: {
+            ...memoryView.memory,
+            id: "new-memory-id",
+            title: input.title ?? memoryView.memory.title,
+            content: input.content ?? memoryView.memory.content,
+            category: input.category ?? memoryView.memory.category,
+            linkedTaskId: input.linkedTaskId ?? null,
+            revision: 1,
+            createdAt: "2026-11-12T10:00:00.000Z",
+            updatedAt: "2026-11-12T10:00:00.000Z",
+            confirmedAt: "2026-11-12T10:00:00.000Z",
+          },
+          linkedTask: null,
+        };
+      }
+      case "update_project_memory":
+      case "confirm_project_memory":
+      case "archive_project_memory":
+      case "restore_project_memory":
+        return memoryView;
+      case "list_project_decisions": {
+        if (!withProject) {
+          return [];
+        }
+        const filter = (args?.filter ?? {}) as {
+          status?: string | null;
+          taskId?: string | null;
+        };
+        const decisions = [confirmedDecision, draftDecision];
+        return decisions.filter(
+          (item) =>
+            (!filter.status || item.decision.status === filter.status) &&
+            (!filter.taskId || item.decision.taskId === filter.taskId),
+        );
+      }
+      case "get_project_decision":
+        if (args?.decisionId === confirmedDecision.decision.id) {
+          return decisionDetail;
+        }
+        if (args?.decisionId === draftDecision.decision.id) {
+          return { decision: draftDecision, revisions: [] };
+        }
+        throw { code: "NOT_FOUND", message: "未找到指定记录" };
+      case "create_project_decision": {
+        const input = (args?.input ?? {}) as { title?: string };
+        return {
+          ...draftDecision,
+          decision: {
+            ...draftDecision.decision,
+            id: "new-decision-id",
+            title: input.title ?? draftDecision.decision.title,
+          },
+        };
+      }
+      case "update_project_decision":
+        return draftDecision;
+      case "confirm_project_decision":
+        return confirmedDecision;
+      case "deprecate_project_decision":
+        return {
+          ...confirmedDecision,
+          decision: {
+            ...confirmedDecision.decision,
+            status: "deprecated",
+            deprecatedAt: "2026-11-12T10:00:00.000Z",
+          },
+        };
+      case "get_recovery_overview":
+        return readRecoveryOverview();
+      case "generate_recovery_package":
+        return makeRecoverySnapshot();
+      case "list_recovery_snapshots": {
+        const snapshot = makeRecoverySnapshot();
+        return [
+          {
+            id: snapshot.id,
+            projectId: snapshot.projectId,
+            generatedAt: snapshot.generatedAt,
+            fingerprint: snapshot.fingerprint,
+            taskCount: snapshot.taskCount,
+            memoryCount: snapshot.memoryCount,
+            decisionCount: snapshot.decisionCount,
+          },
+          {
+            id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            projectId: snapshot.projectId,
+            generatedAt: "2026-11-11T10:00:00.000Z",
+            fingerprint: snapshot.fingerprint,
+            taskCount: 1,
+            memoryCount: 1,
+            decisionCount: 1,
+          },
+        ] satisfies RecoverySnapshotSummary[];
+      }
+      case "get_recovery_snapshot": {
+        const snapshot = makeRecoverySnapshot();
+        return {
+          ...snapshot,
+          id: String(args?.snapshotId ?? snapshot.id),
+          generatedAt:
+            args?.snapshotId === "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+              ? "2026-11-11T10:00:00.000Z"
+              : snapshot.generatedAt,
+        };
+      }
+      case "set_recovery_next_task": {
+        const input = (args?.input ?? {}) as { taskId?: string | null };
+        return {
+          projectId: project.id,
+          nextTaskId: input.taskId ?? null,
+          updatedAt: "2026-11-12T10:00:00.000Z",
+        } satisfies RecoveryPreference;
+      }
       case "get_probe_record":
         throw { code: "NOT_FOUND", message: "未找到指定记录" };
       case "create_probe_record":
@@ -282,6 +758,10 @@ describe("XUSHU desktop shell", () => {
     mockBackend();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("renders an honest empty workspace and real health data", async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -293,7 +773,7 @@ describe("XUSHU desktop shell", () => {
 
     await user.click(screen.getByRole("link", { name: "诊断" }));
     expect(await screen.findByText("系统")).toBeInTheDocument();
-    expect(await screen.findByText("v4")).toBeInTheDocument();
+    expect(await screen.findByText("v6")).toBeInTheDocument();
   });
 
   it("shows real workspace counts and the current project", async () => {
@@ -509,5 +989,296 @@ describe("XUSHU desktop shell", () => {
       await screen.findByText("无法读取健康状态", undefined, { timeout: 3_000 }),
     ).toBeInTheDocument();
     expect(screen.getByText("本地数据库尚未就绪")).toBeInTheDocument();
+  });
+
+  it("renders project memory and decisions with explicit confirmation states", async () => {
+    mockBackend({ withProject: true });
+    const user = userEvent.setup();
+    window.location.hash = `#/projects/${project.id}/knowledge`;
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "记忆与决策" })).toBeInTheDocument();
+    expect(await screen.findByText("必须由用户授权提交")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "必须由用户授权提交" }));
+    const memoryRegion = await screen.findByRole("region", { name: "项目记忆详情" });
+    expect(
+      within(memoryRegion).getAllByText("任何 Git 写入都必须由用户确认。").length,
+    ).toBeGreaterThan(0);
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: "项目记忆详情" })).not.toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("tab", { name: "开发决策" }));
+    expect(await screen.findByText("选择 SQLite")).toBeInTheDocument();
+    expect(await screen.findByText("草稿决策")).toBeInTheDocument();
+    expect(screen.getByText("草稿不会进入恢复包")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "选择 SQLite" }));
+    const decisionRegion = await screen.findByRole("region", { name: "开发决策详情" });
+    expect(within(decisionRegion).getByText("使用 SQLite")).toBeInTheDocument();
+    expect(within(decisionRegion).getByText("需要选择本地持久化方案")).toBeInTheDocument();
+  });
+
+  it("creates a project memory from the knowledge page", async () => {
+    mockBackend({ withProject: true });
+    const user = userEvent.setup();
+    window.location.hash = `#/projects/${project.id}/knowledge`;
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "新建记忆" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("标题"), "新的约束");
+    await user.type(screen.getByLabelText("内容"), "约束内容");
+    await user.click(screen.getByRole("button", { name: "保存记忆" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(
+        "create_project_memory",
+        expect.objectContaining({
+          input: expect.objectContaining({
+            projectId: project.id,
+            title: "新的约束",
+            content: "约束内容",
+            sourceType: "user",
+            confirmed: true,
+          }),
+        }),
+      );
+    });
+  });
+
+  it.each([
+    ["memory", "必须由用户授权提交", "编辑", "编辑项目记忆"],
+    ["decisions", "草稿决策", "编辑草稿", "编辑决策草稿"],
+  ])("restores focus after closing a %s edit dialog", async (tab, title, edit, formTitle) => {
+    mockBackend({ withProject: true });
+    const user = userEvent.setup();
+    window.location.hash = `#/projects/${project.id}/knowledge?tab=${tab}`;
+    render(<App />);
+
+    const row = await screen.findByRole("button", { name: title });
+    await user.click(row);
+    await user.click(await screen.findByRole("button", { name: edit }));
+    const form = await screen.findByRole("dialog", { name: formTitle });
+    expect(form).toContainElement(document.activeElement as HTMLElement);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(row).toHaveFocus());
+  });
+
+  it("creates a decision draft from the knowledge page", async () => {
+    mockBackend({ withProject: true });
+    const user = userEvent.setup();
+    window.location.hash = `#/projects/${project.id}/knowledge?tab=decisions`;
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "新建决策" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("标题"), "新的架构决策");
+    await user.type(screen.getByLabelText("要解决的问题"), "需要选择缓存方案");
+    await user.type(screen.getByLabelText("背景与约束"), "本地优先");
+    await user.type(screen.getByLabelText("备选方案（每行一个）"), "内存缓存\n文件缓存");
+    await user.type(screen.getByLabelText("最终采用的方案"), "使用内存缓存");
+    await user.type(screen.getByLabelText("采用该方案的原因"), "实现简单");
+    await user.type(screen.getByLabelText("已知代价与风险"), "进程重启丢失");
+    await user.click(screen.getByRole("button", { name: "保存为草稿" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(
+        "create_project_decision",
+        expect.objectContaining({
+          input: expect.objectContaining({
+            projectId: project.id,
+            title: "新的架构决策",
+            problem: "需要选择缓存方案",
+            alternatives: ["内存缓存", "文件缓存"],
+            decision: "使用内存缓存",
+          }),
+        }),
+      );
+    });
+  });
+
+  it("renders recovery summary and copies the exact generated markdown", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    mockBackend({ withProject: true });
+    window.location.hash = "#/recovery";
+    render(<App />);
+
+    expect(await screen.findByRole("region", { name: "下一步" })).toBeInTheDocument();
+    expect(await screen.findByText("必须由用户授权提交")).toBeInTheDocument();
+    expect(screen.getByText("按生成时状态；之后可能过期")).toBeInTheDocument();
+
+    const copyButton = screen.getByRole("button", { name: "复制恢复指令" });
+    expect(copyButton).toBeEnabled();
+    await user.click(copyButton);
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1), { timeout: 2_000 });
+    expect(writeText.mock.calls[0][0]).toBe(makeRecoverySnapshot().markdown);
+  });
+
+  it("requires confirmation before copying a stale recovery snapshot", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    mockBackend({ withProject: true, recoveryState: "stale" });
+    window.location.hash = "#/recovery";
+    render(<App />);
+
+    expect(await screen.findByText("这份快照已经过期")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "复制恢复指令" }));
+    expect(await screen.findByText("复制已过期的恢复指令？")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "仍然复制" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1), { timeout: 2_000 });
+    expect(String(writeText.mock.calls[0][0])).toContain("> 注意：这份恢复上下文生成于");
+    expect(String(writeText.mock.calls[0][0])).toContain("Git 状态或工作区指纹已变化");
+  });
+
+  it.each(["page", "preview"] as const)(
+    "checks for Git changes before copying from the recovery %s",
+    async (entry) => {
+      const user = userEvent.setup();
+      const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+      let gitChanged = false;
+      mockBackend({
+        withProject: true,
+        readRecoveryOverview: () => makeRecoveryOverview(gitChanged ? "stale" : "fresh"),
+      });
+      window.location.hash = "#/recovery";
+      render(<App />);
+
+      await screen.findByRole("region", { name: "下一步" });
+      if (entry === "preview") {
+        await user.click(screen.getByRole("button", { name: "预览完整指令" }));
+      }
+      const scope =
+        entry === "preview"
+          ? within(await screen.findByRole("dialog", { name: "完整恢复指令" }))
+          : screen;
+      gitChanged = true;
+      const copyButton = scope.getByRole("button", { name: "复制恢复指令" });
+      await user.click(copyButton);
+
+      expect(await screen.findByText("复制已过期的恢复指令？")).toBeInTheDocument();
+      expect(writeText).not.toHaveBeenCalled();
+      await user.click(screen.getByRole("button", { name: "仍然复制" }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+      const copied = String(writeText.mock.calls[0][0]);
+      expect(copied).toContain("Git 状态或工作区指纹已变化");
+      expect(copied.endsWith(makeRecoverySnapshot().markdown)).toBe(true);
+      await waitFor(() => expect(copyButton).toHaveFocus());
+    },
+  );
+
+  it("keeps the previewed snapshot when a newer one is generated before copy", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    let replaced = false;
+    mockBackend({
+      withProject: true,
+      readRecoveryOverview: () => {
+        const overview = makeRecoveryOverview();
+        if (replaced && overview.latest) {
+          overview.latest = {
+            ...overview.latest,
+            id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            markdown: "# New snapshot",
+          };
+        }
+        return overview;
+      },
+    });
+    window.location.hash = "#/recovery";
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "预览完整指令" }));
+    const preview = within(await screen.findByRole("dialog", { name: "完整恢复指令" }));
+    replaced = true;
+    await user.click(preview.getByRole("button", { name: "复制恢复指令" }));
+
+    expect(await screen.findByText("复制历史恢复指令？")).toBeInTheDocument();
+    expect(writeText).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "仍然复制" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const copied = String(writeText.mock.calls[0][0]);
+    expect(copied).toContain("这是历史恢复快照");
+    expect(copied.endsWith(makeRecoverySnapshot().markdown)).toBe(true);
+  });
+
+  it("leaves the clipboard untouched if the current snapshot cannot be checked", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    let unavailable = false;
+    mockBackend({
+      withProject: true,
+      readRecoveryOverview: () => {
+        if (unavailable) throw { code: "RECOVERY_ERROR", message: "检查失败" };
+        return makeRecoveryOverview();
+      },
+    });
+    window.location.hash = "#/recovery";
+    render(<App />);
+
+    await screen.findByRole("region", { name: "下一步" });
+    unavailable = true;
+    await user.click(screen.getByRole("button", { name: "复制恢复指令" }));
+
+    expect(await screen.findByText("无法检查恢复快照")).toBeInTheDocument();
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it("persists the selected next task and regenerates the recovery snapshot", async () => {
+    mockBackend({ withProject: true });
+    const user = userEvent.setup();
+    window.location.hash = "#/recovery";
+    render(<App />);
+
+    await screen.findByRole("region", { name: "下一步" });
+    const setNextButton = screen.getByRole("button", { name: "设为下一步" });
+    await waitFor(() => expect(setNextButton).toBeEnabled());
+    await user.click(setNextButton);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(
+        "set_recovery_next_task",
+        expect.objectContaining({
+          input: { projectId: project.id, taskId: task.id },
+        }),
+      );
+      expect(invokeMock).toHaveBeenCalledWith(
+        "generate_recovery_package",
+        expect.objectContaining({ projectId: project.id }),
+      );
+    });
+  });
+
+  it("opens a historical recovery snapshot with a not-current warning", async () => {
+    mockBackend({ withProject: true });
+    const user = userEvent.setup();
+    window.location.hash = "#/recovery";
+    render(<App />);
+
+    const historyButton = await screen.findByRole("button", { name: "历史快照" });
+    await user.click(historyButton);
+    expect(await screen.findByText("历史恢复快照")).toBeInTheDocument();
+    const viewButtons = await screen.findAllByRole("button", { name: "查看" });
+    await user.click(viewButtons[1]);
+
+    expect(await screen.findByText("这是历史快照")).toBeInTheDocument();
+    expect(await screen.findByText("完整恢复指令")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(historyButton).toHaveFocus());
+  });
+
+  it("generates a recovery package when none exists", async () => {
+    mockBackend({ withProject: true, recoveryState: "no_snapshot" });
+    const user = userEvent.setup();
+    window.location.hash = "#/recovery";
+    render(<App />);
+
+    expect(await screen.findByText("尚未生成恢复包")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "生成恢复包" }));
+    expect(await screen.findByRole("region", { name: "下一步" })).toBeInTheDocument();
   });
 });

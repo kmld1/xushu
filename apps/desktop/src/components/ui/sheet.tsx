@@ -62,7 +62,7 @@ function SheetFooter({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
       className={cn(
-        "flex items-center justify-end gap-2 border-t border-line/80 px-5 py-3",
+        "flex flex-wrap items-center justify-end gap-2 border-t border-line/80 px-5 py-3",
         className,
       )}
       {...props}

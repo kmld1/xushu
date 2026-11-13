@@ -935,20 +935,7 @@ fn directory_redirection_is_refused() {
 
     #[cfg(windows)]
     {
-        let script = format!(
-            "New-Item -ItemType Junction -Path '{}' -Target '{}' -ErrorAction Stop | Out-Null",
-            claude_dir.to_string_lossy().replace('\'', "''"),
-            redirected.to_string_lossy().replace('\'', "''")
-        );
-        let output = Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-            .output()
-            .expect("run powershell");
-        assert!(
-            output.status.success(),
-            "create junction failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        junction(&claude_dir, &redirected);
 
         let preview = fixture.preview();
         assert!(preview.blocked_reason.is_some());
@@ -1327,10 +1314,19 @@ fn junction(path: &Path, target: &Path) {
     let result = Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", &script])
         .output()
-        .unwrap();
+        .expect("launch PowerShell for fixture junction");
     assert!(
         result.status.success(),
-        "fixture junction could not be created"
+        "fixture junction could not be created ({}): {}",
+        result.status,
+        String::from_utf8_lossy(&result.stderr).trim()
+    );
+    assert_eq!(
+        path.canonicalize().expect("resolve fixture junction"),
+        target
+            .canonicalize()
+            .expect("resolve fixture junction target"),
+        "fixture junction must redirect to the intended target"
     );
 }
 

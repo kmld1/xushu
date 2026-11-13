@@ -22,6 +22,9 @@ function pageTitle(pathname: string) {
   if (pathname === "/") {
     return "工作台";
   }
+  if (pathname.startsWith("/projects/") && pathname.endsWith("/knowledge")) {
+    return "记忆与决策";
+  }
   if (pathname === "/projects" || pathname.startsWith("/projects/")) {
     return "项目";
   }
@@ -30,6 +33,9 @@ function pageTitle(pathname: string) {
   }
   if (pathname === "/verification" || pathname.startsWith("/verification/")) {
     return "验收中心";
+  }
+  if (pathname === "/recovery" || pathname.startsWith("/recovery/")) {
+    return "恢复";
   }
   if (pathname === "/diagnostics" || pathname.startsWith("/diagnostics/")) {
     return "诊断";

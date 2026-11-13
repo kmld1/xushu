@@ -21,6 +21,7 @@ import { StateSpine } from "@/components/state-spine";
 import { StateTrack } from "@/components/state-track";
 import { PriorityBadge, StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
+import { TaskKnowledgeSection } from "@/features/knowledge/task-knowledge-section";
 import { CriterionList } from "@/features/tasks/criterion-list";
 import { EditTaskDialog } from "@/features/tasks/edit-task-dialog";
 import { useArchiveTask, useRestoreTask, useTaskDetail } from "@/features/tasks/queries";
@@ -221,6 +222,10 @@ export function TaskDetailPage() {
 
           <div className="border-t border-line/70 pt-5">
             <CriterionList detail={detail.data} readOnly={criteriaReadOnly} />
+          </div>
+
+          <div className="border-t border-line/70 pt-5">
+            <TaskKnowledgeSection projectId={task.projectId} taskId={task.id} />
           </div>
 
           <Section className="border-t border-line/70 pt-5">

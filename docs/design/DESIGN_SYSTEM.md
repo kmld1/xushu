@@ -1,6 +1,6 @@
 # XUSHU Design System
 
-> 版本：2.2（Phase 4 · Claude Hooks，2026-11-09）
+> 版本：2.3（Phase 5 · 记忆与恢复，2026-11-12）
 > 适用范围：XUSHU 所有桌面端页面、组件、窗口与后续阶段。
 > 设计方法：先读本文件 → 使用 `frontend-design` Skill → 复用 Tokens / App Shell / 共享组件 → 实现 → 质量检查 → 更新 `UI_AUDIT.md` → 人工视觉复核。
 > 视觉状态：**VISUAL_REVIEW_PENDING**（技术检查通过，等待用户手动截图）。
@@ -363,6 +363,35 @@ XUSHU 自 Phase 3.6 起使用自定义标题栏（`decorations: false` + `shadow
 
 活动事件状态：`执行中`（Loader2 旋转 + primary）、`成功`（CheckCircle2 + success）、`失败`（CircleX + destructive）、`状态未知`（CircleHelp + warning）、`已观察`（CircleDot + info）、`已结束`（CircleSlash + muted）。会话状态：`进行中`、`已结束`、`结束未确认`。不得把“未观察到结束”显示为成功。
 
+### 11.5 记忆、决策与恢复状态
+
+| 对象 | 状态 | 中文 | 图标 | Token |
+|---|---|---|---|---|
+| 记忆确认 | confirmed | 已确认 | `BadgeCheck` | success |
+| 记忆确认 | unconfirmed | 未确认 | `CircleHelp` | warning |
+| 记忆有效性 | archived | 已归档 | `Archive` | muted |
+| 决策 | draft | 草稿 | `FilePenLine` | info |
+| 决策 | confirmed | 已确认 | `BadgeCheck` | success |
+| 决策 | superseded | 已被取代 | `History` | warning |
+| 决策 | deprecated | 已废弃 | `Ban` | muted |
+| 恢复快照 | fresh | 当前 | `BadgeCheck` | success |
+| 恢复快照 | stale | 已过期 | `History` | warning |
+| 恢复快照 | no_snapshot | 尚未生成 | `CircleSlash` | muted |
+| 下一步 | user_selected | 用户指定 | `UserRoundCheck` | success |
+| 下一步 | suggested | 系统建议 | `Wand2` | info |
+| 下一步 | needs_confirmation | 需要人工确认 | `CircleHelp` | warning |
+| Git | available | 可用 | — | success |
+| Git | unknown | UNKNOWN | — | warning |
+
+规则：
+
+- 记忆/决策/恢复状态必须图标 + 中文 + 颜色，不得只靠颜色。
+- 未确认记忆必须与已确认记忆分开展示，并明确“不是事实”，不得作为权威上下文。
+- 草稿决策必须明确“不会进入恢复包”；已被取代/废弃决策不得作为当前约束展示。
+- 恢复快照过期时必须显示变化来源与“重新生成”建议；历史快照必须标记为历史，不得冒充当前。
+- 复制过期或历史恢复指令时，剪贴板文本开头必须加入警告；复制必须是用户主动操作。
+- 记忆、决策、Hook 事件与恢复包都不得显示为验收证据；任务完成仍由独立验证与人工确认决定。
+
 ## 12. Components
 
 ### 12.1 Button
@@ -433,6 +462,18 @@ XUSHU 自 Phase 3.6 起使用自定义标题栏（`decorations: false` + `shadow
 - `ClaudeActivitySheet`：右侧 760px Sheet；会话列表 + 未结束工具调用 + 事件时间线；命令、哈希、时间使用 mono；不展示原始 Prompt、命令、文件内容或输出。
 - `ClaudeStateBadge` / `ClaudeEventStatus` / `ClaudeSessionState`：图标 + 中文 + 语义色；running 使用旋转图标，其他状态不使用装饰动画。
 - 接入区块只负责观察，不出现“完成”“通过”或任务 KPI；文案明确“事件不等于验收通过”。
+
+### 12.11 项目记忆、决策与恢复组件
+
+- `MemoryConfirmationBadge` / `MemoryArchivedBadge`：记忆确认/归档状态；图标 + 中文 + 语义色。
+- `DecisionStatusBadge`：草稿/已确认/已被取代/已废弃；草稿与已确认优先使用 info/success。
+- `RecoveryFreshnessBadge` / `NextStepKindBadge` / `RecoveryGitBadge`：快照新鲜度、下一步来源、Git 可用性。
+- `MemoryDetailSheet` / `DecisionDetailSheet`：右侧 760px Sheet；正文可滚动，Header/Footer 固定；Footer 使用 `flex-wrap`，窄窗口不隐藏操作。
+- `MemoryFormDialog` / `DecisionFormDialog`：短表单 Dialog，最大宽度 2xl/3xl；正文可滚动；标签在输入上方；错误字段 `aria-invalid` + `role="alert"`。
+- `RecoveryInstructionsSheet`：完整恢复指令预览；来源边界提示、深色 `code-*` Markdown 块、复制按钮；过期/历史警告置顶。
+- `RecoveryHistorySheet`：最近 20 份快照；当前/历史明确标记；查看时显示加载态，不伪造内容。
+- 项目知识页的记忆/决策行使用“类别/状态 + 标题 + 元数据 + 查看”的日志式行，不套 Card；分类图标只承担识别，不承担唯一状态表达。
+- 恢复页的“下一步”使用现有 Focus Panel 语言（2px primary 左边线 + `surface-raised`），不新增 KPI 卡片。
 
 ## 13. Page Patterns
 
@@ -511,11 +552,37 @@ XUSHU 自 Phase 3.6 起使用自定义标题栏（`decorations: false` + `shadow
 
 ### 13.10 项目详情 · Claude Code 接入
 
-- 顺序：仓库 strip → Claude Code 接入 strip → 主列任务表 / 侧列项目信息。
+- 顺序：仓库 strip → Claude Code 接入 strip → 项目记忆与决策 strip → 主列任务表 / 侧列项目信息。
 - 接入 strip 不抢任务主列的视觉重量；未配置时正文只保留一段观察范围说明与一个主操作，不显示空 KPI。
 - 已启用时显示最近 4 条事件与“查看全部活动”；状态、待导入、未结束工具调用和错误原因同屏可见。
 - 活动 Sheet 中的会话/时间线是真实数据；没有事件时使用 plain EmptyState，不构造演示会话。
 - 归档项目不允许安装/修复，但允许停用/卸载已有 Hooks，并明确说明。
+
+### 13.11 项目记忆与决策
+
+- 路由：`/projects/:projectId/knowledge`；详情型子页面，保留 `PageHeader`（标题“记忆与决策”，meta 项目名/路径/归档状态）。
+- 顶部说明“记忆与决策是开发上下文，不会改变任务状态、验收证据或完成门禁”；右上提供“生成恢复包”入口。
+- 下划线 Tabs：项目记忆 / 开发决策；Tabs 上方可显示来自任务详情的“仅显示关联任务”筛选条，使用左侧 info 线 + 清除按钮。
+- 记忆工具栏：类别筛选、包含已归档、数量、新建记忆；决策工具栏：状态筛选、数量、新建决策。主操作在工具栏右侧，不另设页头大按钮。
+- 列表使用 `divide-y` 日志行：类别/状态 + 标题 + 确认/决策 Badge；第二行内容摘要；第三行修订、更新时间、关联任务与“查看”。不套 Card。
+- 记忆详情/决策详情使用右侧 Sheet；修订历史使用可展开的 `details`，默认显示版本、标题、变更说明与时间。
+- 新建/编辑使用 Dialog；决策支持“每行一个备选方案”，并可在草稿阶段选择“取代已确认决策”。
+- 归档项目只读：隐藏新建按钮，详情 Sheet 不显示编辑/确认/归档操作，明确说明。
+- 空白状态使用 plain EmptyState + 新建入口；错误/加载状态复用共享组件。
+
+### 13.12 恢复 / 跨会话上下文
+
+- 路由：`/recovery`；一级页面，页面名称由 44px 顶部工作带承载，内容使用 `sr-only h1`。
+- 首屏“恢复带”：新鲜度 Badge、生成时间、指纹、任务/记忆/决策计数、当前项目；下方为一组单行操作：生成/重新生成、预览完整指令、复制恢复指令、历史快照、检查是否过期。
+- 尚无快照：plain EmptyState“尚未生成恢复包” + 两组说明（会包含什么 / 数据边界）；不构造演示恢复内容。
+- 快照过期：顶部 warning Alert 列出变化来源，建议重新生成；复制时先二次确认，剪贴板文本开头加入过期警告。
+- 下一步：沿用 Focus Panel（2px primary 左边线 + `surface-raised`）；显示来源（用户指定/系统建议/需要人工确认）、任务状态、依据；提供任务选择与“设为下一步/清除指定”。
+- 摘要主体：双列（≥1280px）——项目与 Git、任务、独立验证；Claude Code 活动、已确认记忆、开发决策、待读文件、冲突与缺失信息；窄窗口纵向堆叠。
+- 验证状态必须写“按生成时状态”，不得把过期结果写成“当前测试通过”。
+- “数据来源、包含上限与排除项”使用 `<details>` 折叠；保留数据库读取时间、Git 检查时间、计数、长文本截断说明与隐私排除项。
+- 完整恢复指令使用右侧 Sheet：边界提示 + 深色 `code-*` Markdown 块 + 复制；历史快照在该 Sheet 中明确“这是历史快照，不代表当前状态”。
+- 历史快照 Sheet：最近 20 份，当前/历史 Badge；查看时显示加载态；不把历史快照标记为当前。
+- 500×480 下按钮换行、任务选择宽度收敛、Sheet Footer 可换行；不得出现页面级横向滚动。
 
 ## 14. Motion
 
@@ -601,3 +668,14 @@ XUSHU 自 Phase 3.6 起使用自定义标题栏（`decorations: false` + `shadow
 - 接入状态使用图标 + 中文 + 颜色；事件成功/失败/未知与会话结束未确认分开表达；不把 Hook 事件当作任务完成证据。
 - 已通过 typecheck、Lint、48 个 Vitest、生产构建与无截图桌面冒烟（接入区块、预览、1366/500 布局、工作区回归）。
 - 视觉状态：**VISUAL_REVIEW_PENDING**。安装预览与活动 Sheet 的浅色/深色人工视觉复核尚未完成。
+
+## 22. Phase 5 实现说明
+
+- 已实际调用 `frontend-design` Skill（当前主会话，2026-11-12），未使用子 Agent，未自动截图/录屏。
+- 新增一级导航“恢复”，以及项目详情子页面“记忆与决策”；保留 44px 顶部工作带、240/52px 侧栏、自定义窗口控制与 Snap Overlay。
+- 项目详情新增“项目记忆与决策”strip；任务详情新增“相关决策与记忆”；工作台焦点面板增加“查看恢复上下文”入口。
+- 记忆/决策使用日志式 `divide-y` 行、右侧详情 Sheet 与编辑 Dialog；恢复页使用“恢复带 + Focus Panel + 双列摘要 + 数据来源 details”；完整指令与历史快照使用 Sheet。
+- 颜色、字体、间距、圆角、阴影与状态全部复用现有 Tokens；未新增全局配色。新增状态映射：记忆确认/归档、决策草稿/确认/取代/废弃、恢复新鲜度、下一步来源与 Git 可用性。
+- `SheetFooter` 增加 `flex-wrap`，保证 500px 窗口下多个操作按钮可换行；未改变其他页面结构。
+- 项目知识页与恢复页通过 typecheck、Lint、Vitest、生产构建与隔离桌面 E2E；E2E 验证记忆/决策/快照 IPC、fresh → stale → fresh、任务状态不变与页面文本可见。
+- 视觉状态：**VISUAL_REVIEW_PENDING**。记忆/决策 Dialog 与 Sheet、恢复页双列与窄窗、深浅主题、过期复制确认与历史快照仍需用户手动截图复核。

@@ -28,7 +28,7 @@ fn opens_database_with_safe_pragmas_and_migrations() {
     assert!(health.foreign_keys_enabled);
     assert!(!health.foreign_key_violations);
     assert_eq!(health.journal_mode.to_ascii_lowercase(), "wal");
-    assert_eq!(health.schema_version, 5);
+    assert_eq!(health.schema_version, 6);
     assert_eq!(health.record_count, 0);
     assert_eq!(health.database_file, "xushu.db");
 }
@@ -39,8 +39,8 @@ fn migrations_are_idempotent() {
     let report = database.migrate().expect("repeat migrations");
 
     assert_eq!(report.applied, Vec::<i64>::new());
-    assert_eq!(report.current_version, 5);
-    assert_eq!(database.health().expect("health").schema_version, 5);
+    assert_eq!(report.current_version, 6);
+    assert_eq!(database.health().expect("health").schema_version, 6);
 }
 
 #[test]
@@ -269,6 +269,61 @@ fn list_limit_is_validated() {
 }
 
 #[test]
+fn phase5_migration_preserves_phase4_data() {
+    let directory = TempDir::new().expect("create temp directory");
+    let mut connection =
+        Connection::open(directory.path().join("phase4.db")).expect("open raw connection");
+
+    let phase_four =
+        run_migrations(&mut connection, &MIGRATIONS[..5]).expect("apply phase 4 migrations");
+    assert_eq!(phase_four.current_version, 5);
+
+    connection
+        .execute_batch(
+            "INSERT INTO projects (id, name, root_path, root_path_key, created_at, updated_at)
+             VALUES ('p1', '旧项目', 'C:\\old', 'c:\\old',
+                     '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+             INSERT INTO tasks (
+                 id, project_id, title, description, priority, status, revision,
+                 block_reason, archived_at, created_at, updated_at
+             ) VALUES (
+                 't1', 'p1', '旧任务', '', 'medium', 'draft', 1,
+                 NULL, NULL, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+             );",
+        )
+        .expect("seed phase 4 data");
+
+    let phase_five = run_migrations(&mut connection, MIGRATIONS).expect("apply phase 5 migration");
+    assert_eq!(phase_five.applied, vec![6]);
+    assert_eq!(phase_five.current_version, 6);
+
+    let project_count: i64 = connection
+        .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))
+        .expect("project count");
+    assert_eq!(project_count, 1);
+    let task_title: String = connection
+        .query_row("SELECT title FROM tasks WHERE id = 't1'", [], |row| {
+            row.get(0)
+        })
+        .expect("task title");
+    assert_eq!(task_title, "旧任务");
+
+    let new_table_count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name IN (
+                'project_memories', 'project_memory_revisions',
+                'decisions', 'decision_revisions',
+                'project_recovery_preferences', 'recovery_snapshots'
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .expect("new table count");
+    assert_eq!(new_table_count, 6);
+}
+
+#[test]
 fn database_creates_nested_parent_directories() {
     let directory = TempDir::new().expect("create temp directory");
     let database_path = directory
@@ -280,5 +335,5 @@ fn database_creates_nested_parent_directories() {
     let database = Database::open(&database_path).expect("open nested database");
 
     assert!(database_path.exists());
-    assert_eq!(database.health().expect("health").schema_version, 5);
+    assert_eq!(database.health().expect("health").schema_version, 6);
 }

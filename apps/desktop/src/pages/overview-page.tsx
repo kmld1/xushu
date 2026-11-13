@@ -175,6 +175,13 @@ function NextAction({
         <p className="mt-1 max-w-2xl break-words text-xs leading-5 text-muted-foreground">
           {issue.reason}
         </p>
+        <Link
+          to="/recovery"
+          className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted-foreground underline-offset-4 hover:text-primary hover:underline"
+        >
+          查看恢复上下文
+          <ArrowRight className="size-3" aria-hidden="true" />
+        </Link>
       </div>
       <Button asChild size="sm" className="justify-self-start">
         <Link to={issue.to}>{issue.action}</Link>

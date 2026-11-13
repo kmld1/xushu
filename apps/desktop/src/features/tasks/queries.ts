@@ -30,6 +30,7 @@ async function invalidateBusinessData(queryClient: QueryClient) {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: taskQueryKeys.all }),
     queryClient.invalidateQueries({ queryKey: taskQueryKeys.workspace }),
+    queryClient.invalidateQueries({ queryKey: ["recovery"] }),
   ]);
 }
 

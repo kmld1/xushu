@@ -97,6 +97,7 @@ async function invalidateVerificationData(
     queryClient.invalidateQueries({ queryKey: verificationQueryKeys.queue }),
     queryClient.invalidateQueries({ queryKey: taskQueryKeys.all }),
     queryClient.invalidateQueries({ queryKey: taskQueryKeys.workspace }),
+    queryClient.invalidateQueries({ queryKey: ["recovery"] }),
     taskId
       ? queryClient.invalidateQueries({ queryKey: verificationQueryKeys.runs(taskId) })
       : Promise.resolve(),
@@ -137,9 +138,12 @@ export function useCancelVerification() {
   return useMutation({
     mutationFn: cancelVerification,
     onSuccess: async (_result, runId) => {
-      await queryClient.invalidateQueries({
-        queryKey: verificationQueryKeys.run(runId),
-      });
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: verificationQueryKeys.run(runId),
+        }),
+        queryClient.invalidateQueries({ queryKey: ["recovery"] }),
+      ]);
     },
   });
 }

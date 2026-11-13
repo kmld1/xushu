@@ -216,6 +216,25 @@ impl<'a> TaskRepository<'a> {
         Ok(tasks)
     }
 
+    /// 恢复包使用：不因项目已归档而隐藏任务，但仍排除已归档任务。
+    pub(crate) fn recovery_candidates(
+        &self,
+        project_id: &str,
+        limit: i64,
+    ) -> Result<Vec<Task>, CoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, project_id, title, description, priority, status, revision,
+                    block_reason, archived_at, created_at, updated_at
+             FROM tasks
+             WHERE project_id = ?1 AND archived_at IS NULL
+             ORDER BY updated_at DESC, id DESC
+             LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![project_id, limit], row_to_task)?;
+        let tasks = rows.collect::<Result<Vec<_>, _>>()?;
+        Ok(tasks)
+    }
+
     pub(crate) fn active_tasks(
         &self,
         status: Option<TaskStatus>,
@@ -1095,7 +1114,7 @@ fn check_task_revision(task: &Task, expected: i64) -> Result<(), CoreError> {
     Ok(())
 }
 
-fn criteria_with_completion(
+pub(crate) fn criteria_with_completion(
     connection: &Connection,
     task: &Task,
     current_code_state: Option<&CodeState>,
