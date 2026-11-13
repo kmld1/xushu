@@ -37,7 +37,7 @@ const appInfo = {
   name: "序枢 XUSHU",
   version: "0.1.0",
   tauriVersion: "2.12.5",
-  phase: "Phase 5",
+  phase: "Phase 6",
   platform: "windows",
 };
 
@@ -47,7 +47,7 @@ const health = {
   foreignKeysEnabled: true,
   foreignKeyViolations: false,
   journalMode: "wal",
-  schemaVersion: 6,
+  schemaVersion: 7,
   recordCount: 0,
   databaseFile: "xushu.db",
 };
@@ -770,10 +770,11 @@ describe("XUSHU desktop shell", () => {
     expect(screen.getByRole("button", { name: "导入第一个项目" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "项目" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "任务" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "数据保护" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("link", { name: "诊断" }));
     expect(await screen.findByText("系统")).toBeInTheDocument();
-    expect(await screen.findByText("v6")).toBeInTheDocument();
+    expect(await screen.findByText("v7")).toBeInTheDocument();
   });
 
   it("shows real workspace counts and the current project", async () => {

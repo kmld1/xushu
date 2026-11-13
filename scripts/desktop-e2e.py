@@ -24,7 +24,7 @@ BUILD = ROOT / 'target' / 'desktop-e2e-build'
 
 def fingerprint(database):
     result = []
-    for suffix in ('', '-wal'):
+    for suffix in ('', '-wal', '-shm'):
         path = database.with_name(database.name + suffix)
         try:
             with path.open('rb') as file:
@@ -103,7 +103,10 @@ def copy_snapshot(snapshot, database):
     shutil.copyfile(snapshot, database)
     if before[1] is not None:
         shutil.copyfile(snapshot.with_name(snapshot.name + '-wal'), database.with_name('xushu.db-wal'))
-    require(fingerprint(snapshot) == before == fingerprint(database), 'evidence database changed while copying')
+    require(
+        fingerprint(snapshot)[:2] == before[:2] == fingerprint(database)[:2],
+        'evidence database changed while copying',
+    )
 
 
 def run(workspace, production, baseline, snapshot, scenario):

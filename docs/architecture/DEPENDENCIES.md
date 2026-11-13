@@ -1,8 +1,8 @@
 # 依赖与工具链基线
 
-> 状态：**Phase 4 代码与技术检查 PASS；真实 Claude Code 联调 NOT_RUN；整体视觉验收 VISUAL_REVIEW_PENDING**（2026-11-09）。
+> 状态：**Phase 6 代码、迁移、IPC、前端、自动化与隔离桌面 E2E PASS；人工视觉、真实故障注入与生产安装包 PENDING/NOT_RUN**（2026-11-13）。
 >
-> 报告：`docs/phases/PHASE_4_REPORT.md`。本文件只记录实际安装、实际锁定并通过检查的版本。依赖升级必须重新生成
+> 报告：`docs/phases/PHASE_6_REPORT.md`。本文件只记录实际安装、实际锁定并通过检查的版本。依赖升级必须重新生成
 > `pnpm-lock.yaml` / `Cargo.lock`，并复跑文末质量门禁。
 
 ## 1. 本机工具链实测
@@ -93,7 +93,7 @@
 | `wry` | 0.57.1 | WebView 绑定 |
 | `tao` | 0.37.2 | 窗口库 |
 | `serde` | 1.0.229 | DTO/命令序列化 |
-| `rusqlite` | 0.41.1 | SQLite 访问；启用 `bundled` |
+| `rusqlite` | 0.41.1 | SQLite 访问；启用 `bundled` + `backup`（Phase 6 的 Online Backup API；feature 不新增 crate/版本） |
 | `libsqlite3-sys` | 0.39.1 | 随 rusqlite 锁定的 SQLite FFI |
 | `uuid` | 1.29.0 | v4 记录 ID |
 | `chrono` | 0.4.45 | UTC RFC3339 时间 |
@@ -111,7 +111,7 @@
 | `xushu-core` | 领域、SQLite、验证据、Claude 接入与导入 |
 | `xushu-hook-protocol` | Hook 白名单信封、字段校验、带盐哈希；不依赖 SQLite |
 | `xushu-hook` | 独立 Hook CLI；依赖 `serde_json` 与协议 crate |
-| `xushu-desktop` | Tauri 命令、窗口与状态 |
+| `xushu-desktop` | Tauri 命令、窗口与状态；Phase 6 直接使用已在锁文件中的 `chrono 0.4.45` 与 `uuid 1.29.0` 生成恢复时间与操作 ID |
 
 - Rust edition：2021；workspace `rust-version = "1.90"`。
 - `rust-toolchain.toml`：`channel = "stable"`、`rustfmt`、`clippy`、
@@ -139,6 +139,8 @@
 18. Phase 4 新增内部 crate `xushu-hook-protocol` 与 `xushu-hook`；未引入 Clap、Tokio、HTTP 服务、Shell 插件或新第三方运行时。`serde_json`/`sha2`/`chrono`/`uuid`/`thiserror` 已在锁文件中，版本未变。
 19. Phase 4 的 Hook 配置使用官方 `command` + `args` exec 形式，不经过 shell；Claude Code 2.1.319 官方文档核对了六个事件字段与 `PostToolUseFailure` 的 `error`/`is_interrupt`。`Stop` 的 `last_assistant_message` 与 `PostToolUse` 的 `tool_response` 被明确忽略。
 20. Phase 4 没有新增 Tauri capability 或插件；新增的七个 Claude IPC 命令都是应用自定义 command，前端仍无通用 FS/Shell/SQL 权限。
+21. Phase 6 只启用 `rusqlite` 的 `backup` feature；`Cargo.lock` 未新增第三方 crate/版本。`xushu-desktop` 新增的直接依赖 `chrono 0.4.45`、`uuid 1.29.0` 原本已在锁文件中（来自 `xushu-core`），版本不变。
+22. Phase 6 未新增 Tauri capability、插件或前端依赖；新增的 15 个数据保护命令都是应用自定义 command。前端仍无通用 SQL、Shell、任意文件系统写入或系统配置修改权限。
 
 ## 5. 锁文件与复现策略
 
@@ -158,10 +160,12 @@
 - 数据库：Tauri `app_data_dir()` 下的 `xushu.db`；Windows 实测
   `%APPDATA%\dev.xushu.desktop\xushu.db`，不进入仓库。
 - PRAGMA：`foreign_keys=ON`、`journal_mode=WAL`、`synchronous=NORMAL`、`busy_timeout=5000`。
-- Schema（迁移版本 4）：`schema_migrations`、`persistence_probes`、`projects`、`tasks`、
+- Schema（迁移版本 7）：`schema_migrations`、`persistence_probes`、`projects`、`tasks`、
   `acceptance_criteria`、`task_transitions`、`manual_confirmations`、`verification_specs`、
   `verification_runs`、`verification_checks`、`evidence`、`claude_integrations`、
-  `claude_sessions`、`claude_tool_calls`、`claude_events`。
+  `claude_sessions`、`claude_tool_calls`、`claude_events`、`project_memories`、
+  `project_memory_revisions`、`decisions`、`decision_revisions`、`project_recovery_preferences`、
+  `recovery_snapshots`、`backup_records`、`backup_settings`、`restore_operations`。
 - Phase 2 业务表使用 UUID、UTC RFC3339、外键、CHECK 约束、唯一根路径 key 与人工确认修订唯一索引。
 - Phase 3 验证表保留运行快照、修订号、Git/工作区指纹、脱敏输出与证据哈希；检查与证据按 run 唯一。
 - Phase 4 Claude 表只保存白名单元数据与带盐哈希；不保存原始 Hook JSON、Prompt、命令、文件内容、工具输出或 transcript。`delivery_id` 唯一约束保证导入幂等，工具事件带语义去重键。
@@ -189,10 +193,28 @@
 | Hook release 计时 | 0 | `xushu-hook.exe` 30 次调用平均 14.46 ms；无敏感内容落入 spool |
 | 桌面无截图冒烟 | 0 | 项目详情接入区块、安装预览、1366/500 布局、工作台回归；未安装任何真实项目 Hooks |
 
+### 7.1 Phase 6 实际质量门禁（2026-11-13）
+
+| 命令 | 退出码 | 结果 |
+|---|---|---|
+| `pnpm typecheck` | 0 | 通过 |
+| `pnpm lint` | 0 | ESLint 10，`--max-warnings 0` |
+| `pnpm test` | 0 | 11 个文件、**83** 项通过 |
+| `pnpm build` | 0 | JS **980.05 kB / gzip 280.77 kB**；仍有 >500 kB 提示 |
+| `pnpm format` | 0 | Prettier 通过 |
+| `cargo fmt --all -- --check` | 0 | 通过 |
+| `cargo check --workspace --all-targets --locked` | 0 | 通过 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | 0 | 无警告 |
+| `cargo test --workspace --locked` | 0 | **186** 项通过，0 失败，0 ignored |
+| 隔离 Tauri E2E（完整恢复） | 0 | 备份、校验、损坏拒绝、正式恢复、最终校验、UI 可见 |
+| 隔离 Tauri E2E（关闭重开） | 0 | 恢复后快照重开一致；正常 DB/WAL/SHM 指纹不变 |
+| 隔离 Tauri E2E（布局/主题） | 0 | 4 视口 × 深浅主题 + 恢复向导；无页面级横向溢出 |
+
 ## 8. 已规划但本阶段未安装
 
 - 生产安装包的 `xushu-hook` sidecar 打包与升级路径（Phase 7）
-- 备份/恢复、日志脱敏与安全加固依赖（Phase 6）
+- 备份加密与密钥管理依赖（未进入 Phase 6；需要新 ADR）
+- 常驻自动备份调度/系统计划任务（未进入 Phase 6；当前仅应用运行期间检查）
 - 安装包、签名与分发工具（Phase 7）
 
 ## 9. 官方参考（核对日期：2026-11-09）

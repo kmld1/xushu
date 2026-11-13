@@ -44,6 +44,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0006_project_memory_and_recovery",
         sql: include_str!("../../migrations/0006_project_memory_and_recovery.sql"),
     },
+    Migration {
+        version: 7,
+        name: "0007_backup_restore_privacy",
+        sql: include_str!("../../migrations/0007_backup_restore_privacy.sql"),
+    },
 ];
 
 /// 一次迁移执行的结果。

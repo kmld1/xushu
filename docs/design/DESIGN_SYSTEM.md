@@ -1,6 +1,6 @@
 # XUSHU Design System
 
-> 版本：2.3（Phase 5 · 记忆与恢复，2026-11-12）
+> 版本：2.4（Phase 6 · 数据保护，2026-11-13）
 > 适用范围：XUSHU 所有桌面端页面、组件、窗口与后续阶段。
 > 设计方法：先读本文件 → 使用 `frontend-design` Skill → 复用 Tokens / App Shell / 共享组件 → 实现 → 质量检查 → 更新 `UI_AUDIT.md` → 人工视觉复核。
 > 视觉状态：**VISUAL_REVIEW_PENDING**（技术检查通过，等待用户手动截图）。
@@ -382,6 +382,19 @@ XUSHU 自 Phase 3.6 起使用自定义标题栏（`decorations: false` + `shadow
 | 下一步 | needs_confirmation | 需要人工确认 | `CircleHelp` | warning |
 | Git | available | 可用 | — | success |
 | Git | unknown | UNKNOWN | — | warning |
+| 备份完整性 | verified | 已验证 | `BadgeCheck` | success |
+| 备份完整性 | failed | 校验失败 | `CircleX` | destructive |
+| 备份完整性 | unverified | 未校验 | `CircleHelp` | warning |
+| 备份完整性 | missing | 目录缺失 | `CircleSlash` | muted |
+| 备份来源 | manual | 手动 | `UserRound` | muted/info |
+| 备份来源 | automatic | 自动 | `Timer` | muted/info |
+| 完整性检查项 | pass | 通过 | `BadgeCheck` | success |
+| 完整性检查项 | fail | 失败 | `CircleX` | destructive |
+| 完整性检查项 | not_run | 未运行 | `CircleSlash` | muted |
+| 恢复结果 | completed | 恢复完成 | `CheckCircle2` | success |
+| 恢复结果 | rolled_back | 已回退 | `Undo2` | warning |
+| 恢复结果 | rollback_failed | 回退失败 | `OctagonAlert` | destructive |
+| 恢复步骤 | done/active/pending/failed | 完成/当前/待进行/失败 | 数字或 ✓ | success/primary/muted/destructive |
 
 规则：
 
@@ -474,6 +487,17 @@ XUSHU 自 Phase 3.6 起使用自定义标题栏（`decorations: false` + `shadow
 - `RecoveryHistorySheet`：最近 20 份快照；当前/历史明确标记；查看时显示加载态，不伪造内容。
 - 项目知识页的记忆/决策行使用“类别/状态 + 标题 + 元数据 + 查看”的日志式行，不套 Card；分类图标只承担识别，不承担唯一状态表达。
 - 恢复页的“下一步”使用现有 Focus Panel 语言（2px primary 左边线 + `surface-raised`），不新增 KPI 卡片。
+
+### 12.12 数据保护组件
+
+- `DataProtectionPage` 状态带：数据库健康、最近备份、策略与未加密提示；使用图标 + 标签 + 值 + 一行说明的紧凑网格，不使用 KPI 卡片。
+- `CreateBackupDialog`：目标目录、范围、预计大小、未加密警告、真实阶段状态、取消请求、结果与失败原因；目标路径使用 mono。
+- `BackupPolicyDialog`：自动开关、目标、间隔、保留、最近自动备份/错误、旧 automatic 备份预览与两步确认清理；手动备份明确不进入自动清理。
+- `BackupVerifySheet`：清单/哈希/隔离完整性检查；校验失败不显示为成功。
+- `RestoreWizardSheet`：7 步真实序列 + 内容分区；兼容性/影响范围/隔离验证依次可见；确认区必须输入“恢复”并勾选风险；执行中不可关闭；结果区分完成/回退/回退失败。
+- `IntegrityCheckList` / `IntegrityReportSummary`：检查项、Schema、时间、计数；失败项保留 detail，不只显示“失败”。
+- `PrivacyInventory` / `HooksBoundary`：数据资产行式清单与 Hook 采集/排除边界；不显示 Salt 内容或事件正文；敏感/是否进入备份使用图标 + 文字 + 语义色。
+- 备份/恢复路径、SHA-256、Schema、备份 ID 使用 mono；长路径 `break-all`，不撑破布局。
 
 ## 13. Page Patterns
 
@@ -584,6 +608,18 @@ XUSHU 自 Phase 3.6 起使用自定义标题栏（`decorations: false` + `shadow
 - 历史快照 Sheet：最近 20 份，当前/历史 Badge；查看时显示加载态；不把历史快照标记为当前。
 - 500×480 下按钮换行、任务选择宽度收敛、Sheet Footer 可换行；不得出现页面级横向滚动。
 
+### 13.13 数据保护 / 备份与恢复
+
+- 路由：`/data-protection`；一级页面，页面名称由 44px 顶部工作带承载，内容使用 `sr-only h1`。
+- 首屏顺序：启动恢复提示（如有）→ 状态带 → 备份与恢复 → 恢复历史 → 数据完整性 → 隐私与本地数据 → 数据目录。
+- 状态带四项：数据库版本/完整性、最近备份、备份策略、备份隐私。使用 `border-y` 与紧凑网格，不套卡片。
+- 备份列表使用 `divide-y` 日志行：来源、时间、完整性 Badge、Schema/格式/大小、路径（mono）、SHA-256、操作（校验/恢复/删除）。没有备份时 plain EmptyState + 创建入口。
+- 备份策略与创建备份使用 Dialog；校验使用 Sheet；恢复使用 7 步向导 Sheet。破坏性操作（删除备份、执行恢复）必须二次确认/输入确认。
+- 未加密、备份范围、Hooks 不自动修改、恢复会替换当前数据库等风险在创建/预检/确认/结果处持续可见，不得只放在文档里。
+- 恢复向导：步骤轨是真实序列，不使用装饰性编号；预检未通过不显示“继续确认”；执行中禁用关闭；结果显示最终校验与回退状态；回退不得显示为成功恢复。
+- 隐私资产清单使用行式 `details` 展开保留/影响/导出；Hook 采集与排除分两列；Salt 只显示存在性/大小。
+- 500×480 下操作按钮换行、向导正文可滚动、Dialog/Sheet 不溢出；不得出现页面级横向滚动。
+
 ## 14. Motion
 
 - Hover/press：120ms ease-out，只改颜色/边框/透明度。
@@ -679,3 +715,14 @@ XUSHU 自 Phase 3.6 起使用自定义标题栏（`decorations: false` + `shadow
 - `SheetFooter` 增加 `flex-wrap`，保证 500px 窗口下多个操作按钮可换行；未改变其他页面结构。
 - 项目知识页与恢复页通过 typecheck、Lint、Vitest、生产构建与隔离桌面 E2E；E2E 验证记忆/决策/快照 IPC、fresh → stale → fresh、任务状态不变与页面文本可见。
 - 视觉状态：**VISUAL_REVIEW_PENDING**。记忆/决策 Dialog 与 Sheet、恢复页双列与窄窗、深浅主题、过期复制确认与历史快照仍需用户手动截图复核。
+
+## 23. Phase 6 实现说明
+
+- 已实际调用 `frontend-design` Skill（当前主会话，2026-11-13），未使用子 Agent，未自动截图/录屏。
+- 新增一级导航“数据保护”（`/data-protection`）；保留 44px 顶部工作带、240/52px 侧栏、自定义窗口控制与 Snap Overlay。
+- 页面使用“状态带 + 备份日志 + 恢复历史 + 完整性报告 + 隐私资产清单 + 数据目录”的账本式结构，不使用 KPI 卡片墙。
+- 新增创建备份 Dialog、备份策略 Dialog、备份校验 Sheet、7 步恢复向导 Sheet、完整性检查列表、数据资产清单与 Hook 边界组件。
+- 颜色、字体、间距、圆角、阴影与状态全部复用现有 Tokens；新增备份完整性/来源、完整性检查项与恢复结果状态映射。未引入新的全局配色或字体。
+- 恢复向导使用真实 7 步序列（选择、兼容性、影响、隔离验证、确认、执行、结果）；确认必须输入“恢复”并勾选风险；执行中不可关闭；结果显示最终校验与回退状态。
+- 布局 E2E 覆盖 500×480、1366×768、1600×900、1920×1080 与深浅主题：顶部工作带 44px、侧栏 52/240px、无页面级横向溢出、可见按钮 ≥20px；500×480 恢复向导正文可滚动。
+- 视觉状态：**VISUAL_REVIEW_PENDING**。数据保护页、创建/策略 Dialog、校验 Sheet、恢复向导的浅色/深色人工视觉、150% 缩放、键盘焦点与真实剪贴板仍需用户手动截图复核。

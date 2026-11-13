@@ -3,6 +3,7 @@ import { HashRouter, Navigate, Route, Routes } from "react-router";
 import { AppLayout } from "@/app/app-layout";
 import { AppProviders } from "@/app/providers";
 import { AppErrorBoundary } from "@/components/app-error-boundary";
+import { DataProtectionPage } from "@/pages/data-protection-page";
 import { NotFoundPage } from "@/pages/not-found-page";
 import { OverviewPage } from "@/pages/overview-page";
 import { DiagnosticsPage } from "@/pages/persistence-page";
@@ -30,6 +31,7 @@ function App() {
               <Route path="tasks/:taskId" element={<TaskDetailPage />} />
               <Route path="verification" element={<VerificationPage />} />
               <Route path="recovery" element={<RecoveryPage />} />
+              <Route path="data-protection" element={<DataProtectionPage />} />
               <Route path="diagnostics" element={<DiagnosticsPage />} />
               <Route path="persistence" element={<Navigate to="/diagnostics" replace />} />
               <Route path="settings" element={<SettingsPage />} />

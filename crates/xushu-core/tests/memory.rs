@@ -88,7 +88,7 @@ fn create_memory(
 fn phase5_schema_is_applied_with_memory_decision_and_recovery_tables() {
     let (_directory, database) = open_db();
     let health = database.health().expect("database health");
-    assert_eq!(health.schema_version, 6);
+    assert_eq!(health.schema_version, 7);
 
     let tables = database
         .with_transaction(|transaction| {

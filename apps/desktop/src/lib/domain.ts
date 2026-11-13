@@ -968,3 +968,297 @@ export type SetNextTaskInput = {
   projectId: string;
   taskId: string | null;
 };
+
+// Phase 6：备份、恢复与数据保护
+
+export type BackupOrigin = "manual" | "automatic";
+
+export type BackupIntegrityStatus = "verified" | "failed" | "unverified" | "missing";
+
+export type BackupRecord = {
+  id: string;
+  backupId: string;
+  directoryPath: string;
+  formatVersion: number;
+  schemaVersion: number;
+  appVersion: string;
+  origin: BackupOrigin;
+  createdAt: string;
+  registeredAt: string;
+  dataSizeBytes: number;
+  manifestSizeBytes: number;
+  payloadSha256: string;
+  integrityStatus: BackupIntegrityStatus;
+  verifiedAt: string | null;
+  lastError: string | null;
+  directoryExists: boolean;
+  manifestExists: boolean;
+};
+
+export type IntegrityCheckStatus = "pass" | "fail" | "not_run";
+
+export type IntegrityCheck = {
+  id: string;
+  label: string;
+  status: IntegrityCheckStatus;
+  detail: string | null;
+};
+
+export type DataCounts = {
+  projects: number;
+  tasks: number;
+  acceptanceCriteria: number;
+  verificationRuns: number;
+  verificationChecks: number;
+  evidence: number;
+  claudeSessions: number;
+  claudeEvents: number;
+  projectMemories: number;
+  projectMemoryRevisions: number;
+  decisions: number;
+  decisionRevisions: number;
+  recoverySnapshots: number;
+  backupRecords: number;
+};
+
+export type DataIntegrityReport = {
+  checkedAt: string;
+  ok: boolean;
+  schemaVersion: number;
+  expectedSchemaVersion: number;
+  integrityMessage: string;
+  counts: DataCounts;
+  checks: IntegrityCheck[];
+};
+
+export type BackupVerification = {
+  backupId: string;
+  verified: boolean;
+  verifiedAt: string | null;
+  checks: IntegrityCheck[];
+  integrity: DataIntegrityReport | null;
+  message: string;
+};
+
+export type BackupPolicy = {
+  automaticEnabled: boolean;
+  targetDirectory: string | null;
+  intervalHours: number;
+  retentionCount: number;
+  lastAutomaticAt: string | null;
+  lastAutomaticErrorCode: string | null;
+  lastAutomaticErrorAt: string | null;
+  updatedAt: string;
+};
+
+export type UpdateBackupPolicyInput = {
+  automaticEnabled: boolean;
+  targetDirectory: string | null;
+  intervalHours: number;
+  retentionCount: number;
+};
+
+export type AutomaticBackupOutcome = {
+  status: "disabled" | "not_due" | "created" | "failed";
+  backup: BackupRecord | null;
+  removedCount: number;
+  message: string | null;
+};
+
+export type CleanupOutcome = {
+  removedBackupIds: string[];
+  skippedCount: number;
+  failures: string[];
+};
+
+export type DataAsset = {
+  id: string;
+  label: string;
+  location: string;
+  authoritative: boolean;
+  regenerable: boolean;
+  sensitive: boolean;
+  includedInBackup: boolean;
+  exportAvailable: boolean;
+  exportNote: string;
+  specialRecovery: boolean;
+  retention: string;
+  impactIfLost: string;
+  countLabel: string;
+  sizeBytes: number | null;
+  notes: string;
+};
+
+export type HooksPrivacyOverview = {
+  eventCount: number;
+  sessionCount: number;
+  integrationCount: number;
+  desiredEnabledProjectCount: number;
+  pendingSpoolEvents: number;
+  pendingSpoolBytes: number;
+  saltPresent: boolean;
+  saltBytes: number;
+  inboxAvailable: boolean;
+  retentionDays: number;
+  maxEventsPerProject: number;
+  collectedFields: string[];
+  excludedFields: string[];
+  note: string;
+};
+
+export type RetentionSummary = {
+  hookEventDays: number;
+  hookMaxEventsPerProject: number;
+  hookMaxSessionsPerProject: number;
+  recoverySnapshotsPerProject: number;
+  backupRetentionCount: number;
+  restoreWorkspaces: string;
+  rollbackArchives: string;
+  backupFiles: string;
+};
+
+export type BackupEncryptionInfo = {
+  encrypted: boolean;
+  supported: boolean;
+  note: string;
+};
+
+export type RestoreOperationSummary = {
+  id: string;
+  backupId: string;
+  backupDirectory: string;
+  startedAt: string;
+  finishedAt: string | null;
+  outcome: "completed" | "rolled_back" | "failed" | "rollback_failed" | string;
+  switchVerified: boolean;
+  rollbackStatus: string;
+};
+
+export type RestoreStartupNotice = {
+  outcome: "abandoned" | "rolled_back" | "completed" | "needs_manual" | string;
+  message: string;
+  journalFile: string;
+  rollbackDirectory: string | null;
+  checkedAt: string;
+};
+
+export type DataProtectionDatabaseHealth = {
+  ok: boolean;
+  integrityOk: boolean;
+  foreignKeysEnabled: boolean;
+  foreignKeyViolations: boolean;
+  journalMode: string;
+  schemaVersion: number;
+  recordCount: number;
+  databaseFile: string;
+};
+
+export type DataProtectionOverview = {
+  generatedAt: string;
+  appVersion: string;
+  schemaVersion: number;
+  dataDirectory: string;
+  database: DataProtectionDatabaseHealth;
+  databaseSizeBytes: number;
+  walSizeBytes: number;
+  shmSizeBytes: number;
+  counts: DataCounts;
+  backups: BackupRecord[];
+  lastBackup: BackupRecord | null;
+  lastVerifiedBackup: BackupRecord | null;
+  backupTotalSizeBytes: number;
+  policy: BackupPolicy;
+  policyTargetFreeBytes: number | null;
+  automaticDue: boolean;
+  restoreOperations: RestoreOperationSummary[];
+  startupNotice: RestoreStartupNotice | null;
+  inventory: DataAsset[];
+  hooks: HooksPrivacyOverview;
+  retention: RetentionSummary;
+  encryption: BackupEncryptionInfo;
+  warnings: string[];
+};
+
+export type RestoreDataSummary = {
+  projects: number;
+  archivedProjects: number;
+  tasks: number;
+  doneTasks: number;
+  criteria: number;
+  verificationRuns: number;
+  evidence: number;
+  claudeEvents: number;
+  memories: number;
+  decisions: number;
+  recoverySnapshots: number;
+  projectNames: string[];
+  missingProjectRootCount: number;
+  runningVerificationCount: number;
+  desiredHookProjectCount: number;
+  databaseSizeBytes: number;
+  lastUpdatedAt: string | null;
+};
+
+export type RestoreDataChange = {
+  label: string;
+  count: number;
+};
+
+export type RestoreHooksReview = {
+  projectCount: number;
+  settingsFilesModified: boolean;
+  pendingSpoolIncluded: boolean;
+  saltIncluded: boolean;
+  note: string;
+};
+
+export type RestorePreflight = {
+  token: string | null;
+  ready: boolean;
+  blockingReason: string | null;
+  backupId: string;
+  backupDirectory: string;
+  createdAt: string;
+  appVersion: string;
+  origin: BackupOrigin;
+  formatVersion: number;
+  backupSchemaVersion: number;
+  currentSchemaVersion: number;
+  schemaAction: "same" | "upgrade" | "incompatible";
+  manifestSha256: string;
+  payloadSha256: string;
+  payloadSizeBytes: number;
+  current: RestoreDataSummary;
+  incoming: RestoreDataSummary | null;
+  changesSinceBackup: RestoreDataChange[];
+  checks: IntegrityCheck[];
+  warnings: string[];
+  effects: string[];
+  hooksReview: RestoreHooksReview;
+  expiresAt: string;
+};
+
+export type RollbackReport = {
+  status: "used" | "failed" | string;
+  directory: string | null;
+  verified: boolean;
+  message: string;
+};
+
+export type RestoreOutcome = {
+  operationId: string;
+  status: "completed" | "rolled_back" | "failed" | "rollback_failed" | string;
+  switchVerified: boolean;
+  finalReport: DataIntegrityReport | null;
+  rollback: RollbackReport;
+  hooksReview: RestoreHooksReview | null;
+  message: string;
+  completedAt: string;
+  warnings: string[];
+};
+
+export type PerformRestoreInput = {
+  token: string;
+  confirmationText: string;
+  acknowledged: boolean;
+};

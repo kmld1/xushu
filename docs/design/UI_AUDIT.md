@@ -1,7 +1,7 @@
 # XUSHU UI Audit
 
-> **VISUAL_REVIEW_PENDING**。Phase 4.2 已完成程序化与真实数据 UI 复核。当前待验收的人工视觉、原生窗口行为和辅助技术清单见 [Phase 4 收尾审计第 5 节](../phases/PHASE_4_CLOSEOUT_AUDIT.md#5-人工视觉与原生行为)。已执行范围见 [Phase 4.2 验收报告](../phases/PHASE_4_2_FINAL_AUDIT.md)。
-> 关联规范：`docs/design/DESIGN_SYSTEM.md`（v2.3 / Phase 5）
+> **VISUAL_REVIEW_PENDING**。Phase 6 已完成数据保护页的程序化、隔离桌面 E2E 与布局/主题测量；人工视觉仍未签收。当前待验收清单见 [Phase 6 报告第 22 节](../phases/PHASE_6_REPORT.md#22-人工验收清单)。Phase 4/5 的历史 PENDING 未被本轮改为 PASS。
+> 关联规范：`docs/design/DESIGN_SYSTEM.md`（v2.4 / Phase 6）
 > 关联报告：`docs/design/UI_REDESIGN_PHASE_3_6.md`
 > 窗口决策：`docs/architecture/ADR/0006-custom-titlebar-window-chrome.md`（取代 ADR-0005）
 > 更新规则：每次新增或修改页面前阅读设计系统；完成后更新本文件。
@@ -19,6 +19,7 @@
 | 验收中心 Verification | `/verification` | Phase 3.6 调整 | 无独立页头；导出在证据工作区标题行；队列 + 证据工作区 | PASS（Vitest + 桌面 E2E + 布局测量） | PENDING |
 | 项目记忆与决策 Knowledge | `/projects/:id/knowledge` | Phase 5 新增 | PageHeader、记忆/决策 Tabs、日志式行、详情 Sheet、编辑 Dialog、任务筛选条 | PASS（Vitest + 桌面 E2E 文本可见） | PENDING |
 | 恢复 Recovery | `/recovery` | Phase 5 新增 | 恢复带、Focus Panel 下一步、双列摘要、完整指令/历史 Sheet、来源 details | PASS（Vitest + 桌面 E2E） | PENDING |
+| 数据保护 Data Protection | `/data-protection` | Phase 6 新增 | 启动提示、状态带、备份日志、恢复历史、完整性报告、隐私资产清单、7 步恢复向导 | PASS（Vitest + 隔离桌面 E2E + 布局/主题测量） | PENDING |
 | 本地数据与健康 | `/diagnostics` | Phase 3.6 调整 | 无独立页头；系统健康、探针说明、表单/记录两栏 | PASS（Vitest + 布局测量） | PENDING |
 | 设置 Settings | `/settings` | Phase 3.6 调整 | 无独立页头；分组行式设置、主题 radio、关于/数据 | PASS（Vitest + 布局测量） | PENDING |
 | 404 | `*` | 保留 | 居中空状态；顶部工作带显示“未找到” | PASS（布局测量） | PENDING |
@@ -57,6 +58,14 @@
 | RecoveryFreshnessBadge / NextStepKindBadge / RecoveryGitBadge | `src/features/recovery/recovery-badges.tsx` | 恢复页、指令 Sheet | 新增：当前/过期/未生成、用户指定/建议/需确认、Git 可用性 |
 | RecoveryInstructionsSheet | `src/features/recovery/recovery-instructions-sheet.tsx` | 恢复页 | 新增：完整指令预览、边界提示、深色 Markdown、复制 |
 | RecoveryHistorySheet | `src/features/recovery/recovery-history-sheet.tsx` | 恢复页 | 新增：最近 20 份快照、当前/历史、加载态 |
+| BackupIntegrityBadge / BackupOriginBadge / IntegrityStatusBadge | `src/features/data-protection/data-protection-badges.tsx` | 数据保护页、校验 Sheet、恢复向导 | 新增：已验证/失败/未校验/目录缺失、手动/自动、通过/失败/未运行；图标 + 中文 + 语义色 |
+| RestoreOutcomeBadge / RestoreHistoryOutcomeBadge | `src/features/data-protection/data-protection-badges.tsx` | 数据保护页、恢复向导 | 新增：完成/已回退/回退失败；回退不显示为成功 |
+| CreateBackupDialog | `src/features/data-protection/create-backup-dialog.tsx` | 数据保护页 | 新增：目标、范围、预计大小、未加密警告、阶段状态、取消、结果 |
+| BackupPolicyDialog | `src/features/data-protection/backup-policy-dialog.tsx` | 数据保护页 | 新增：自动策略、保留、旧 automatic 预览与两步清理 |
+| BackupVerifySheet | `src/features/data-protection/backup-verify-sheet.tsx` | 数据保护页 | 新增：清单/哈希/隔离完整性校验结果 |
+| RestoreWizardSheet | `src/features/data-protection/restore-wizard-sheet.tsx` | 数据保护页 | 新增：7 步序列、影响范围、隔离验证、输入“恢复”+勾选、结果/回退 |
+| IntegrityCheckList / IntegrityReportSummary | `src/features/data-protection/integrity-report.tsx` | 数据保护页、校验 Sheet、恢复向导 | 新增：检查项、Schema、计数、失败 detail |
+| PrivacyInventory / HooksBoundary | `src/features/data-protection/privacy-inventory.tsx` | 数据保护页 | 新增：数据资产、备份包含性、敏感性、Hook 采集/排除、Spool/Salt 边界 |
 
 ## 3. 状态表达检查
 
@@ -70,6 +79,12 @@
 - [x] 自动验证、人工确认、AI 声明在列表/详情中来源可辨。
 - [x] 验证运行中显示旋转图标 + 文字 + 取消按钮。
 - [x] 工作台首屏的“下一步”与“最近验证”直接来自真实任务/运行数据，不构造 KPI。
+- [x] 备份完整性使用“已验证/校验失败/未校验/目录缺失”，未校验或失败不显示为成功。
+- [x] 完整性检查项使用“通过/失败/未运行”+ detail；检查失败不只显示颜色。
+- [x] 恢复结果显示“恢复完成/已回退/回退失败”；回退不显示为成功恢复。
+- [x] 恢复向导 7 步使用真实序列与 `aria-current`；预检未通过不显示“继续确认”。
+- [x] 备份未加密、备份范围、Hooks 不自动修改、恢复会替换当前数据库在创建/预检/确认/结果处可见。
+- [x] 数据资产清单明确 Spool/Salt/项目配置/导出/WebView 偏好是否进入备份；Salt 不显示内容。
 
 ## 4. 可访问性检查（代码层面）
 
@@ -458,3 +473,18 @@
 - 人工视觉复核：**PENDING**
 - 最终 UI 状态：**VISUAL_REVIEW_PENDING**
 - 未获得用户截图前，不得声称 Phase 5 UI 已通过人工视觉验收。
+
+## Phase 6 数据保护页审计（2026-11-13）
+
+- 已调用 `frontend-design` Skill（当前主会话），未使用子 Agent，未自动截图/录屏。
+- 页面：`/data-protection`；状态带、备份日志、恢复历史、完整性报告、隐私资产清单、数据目录。
+- 复用：WorkspaceChrome、240/52px 侧栏、Section、Dialog、Sheet、ConfirmationDialog、EmptyState、LoadingState、ErrorState、Alert、Badge、Button、Input；未新增全局配色或字体。
+- 状态：备份完整性/来源、完整性检查项、恢复结果均为图标 + 中文 + 颜色；长路径/哈希/Schema 使用 mono。
+- 交互：创建备份、策略保存、校验、删除备份、恢复向导；恢复确认要求输入“恢复”+勾选；执行中不可关闭；结果区分完成/回退/回退失败。
+- 自动化：
+  - Vitest 11 个文件、83 项通过；数据保护页测试覆盖创建、校验、完整性检查、恢复确认门禁、预检失败、启动提示。
+  - 隔离 Tauri E2E：备份 → 校验 → 修改 → 预检 → 损坏备份拒绝 → 正式恢复 → 最终校验 → 关闭重开；数据保护页/恢复向导可见。
+  - 布局测量：500×480、1366×768、1600×900、1920×1080，浅色/深色；顶部工作带 44px；侧栏 52/240px；无页面级/主区横向溢出；可见按钮均 ≥20px；500×480 恢复向导宽 460px 且正文可滚动。
+- 证据：`target/phase6-audit/phase6-e2e-result.json`、`phase6-reopen-result.json`、`phase6-layout.json`（已忽略目录）。
+- 人工视觉：**VISUAL_REVIEW_PENDING**。创建/策略 Dialog、校验 Sheet、恢复向导、隐私清单、150% 缩放、键盘焦点与真实剪贴板仍需用户手动截图/操作确认。
+- 未改变窗口控制、44px 工作带、Snap Overlay、侧栏宽度或其他页面结构；未新增 capability。

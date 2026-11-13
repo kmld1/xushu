@@ -1,6 +1,7 @@
 mod business_commands;
 mod claude_commands;
 mod commands;
+mod data_protection_commands;
 mod error;
 mod knowledge_commands;
 mod recovery_commands;
@@ -104,6 +105,21 @@ pub fn run() {
             recovery_commands::list_recovery_snapshots,
             recovery_commands::get_recovery_snapshot,
             recovery_commands::set_recovery_next_task,
+            data_protection_commands::get_data_protection_overview,
+            data_protection_commands::dismiss_restore_notice,
+            data_protection_commands::create_backup,
+            data_protection_commands::cancel_backup,
+            data_protection_commands::list_backups,
+            data_protection_commands::verify_backup,
+            data_protection_commands::delete_backup,
+            data_protection_commands::get_backup_policy,
+            data_protection_commands::update_backup_policy,
+            data_protection_commands::preview_backup_cleanup,
+            data_protection_commands::apply_backup_cleanup,
+            data_protection_commands::run_due_automatic_backup,
+            data_protection_commands::check_data_integrity,
+            data_protection_commands::preflight_restore,
+            data_protection_commands::perform_restore,
         ])
         .run(tauri::generate_context!())
         .expect("运行序枢 XUSHU 桌面程序失败");

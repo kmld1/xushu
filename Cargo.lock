@@ -4341,10 +4341,13 @@ dependencies = [
 name = "xushu-desktop"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tempfile",
+ "uuid",
  "windows-sys 0.61.2",
  "xushu-core",
 ]

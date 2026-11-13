@@ -3,6 +3,7 @@
 //! Phase 1 提供 SQLite 基础与持久化探针；Phase 2 增加项目、任务、验收条件、
 //! 人工确认与统一状态机。所有业务状态转换都必须经过本 crate 的服务层。
 
+pub mod backup;
 pub mod claude;
 pub mod code_state;
 pub mod db;
@@ -21,11 +22,23 @@ pub mod task;
 mod validation;
 pub mod verification;
 
+pub use backup::{
+    AutomaticBackupOutcome, BackupEncryptionInfo, BackupFileEntry, BackupIntegrityStatus,
+    BackupManifest, BackupOrigin, BackupPolicy, BackupRecord, BackupService, BackupVerification,
+    CleanupOutcome, DataAsset, DataCounts, DataIntegrityReport, DataIntegrityService,
+    DataProtectionOverview, DataProtectionService, HooksPrivacyOverview, IntegrityCheck,
+    IntegrityStatus, PerformRestoreInput, RestoreDataChange, RestoreDataSummary,
+    RestoreHooksReview, RestoreJournal, RestoreOperationSummary, RestoreOutcome, RestorePlan,
+    RestorePreflight, RestorePreflightInput, RestorePreflightOutcome, RestoreService,
+    RestoreStartupNotice, RetentionSummary, RollbackReport, UpdateBackupPolicyInput,
+    BACKUP_FORMAT_VERSION, MAX_BACKUP_BYTES, MAX_MANIFEST_BYTES, PAYLOAD_FILE_NAME,
+    RESTORE_CONFIRMATION_TEXT, RESTORE_TOKEN_TTL_MINUTES,
+};
 pub use claude::{
     ClaudeActionInput, ClaudeActivityEvent, ClaudeActivitySnapshot, ClaudeHookPlannedEntry,
     ClaudeHookPreview, ClaudeImportReport, ClaudeInstallState, ClaudeIntegrationService,
-    ClaudeIntegrationStatus, ClaudeRuntimePaths, ClaudeSessionSummary, ClaudeToolCallSummary,
-    InstallClaudeHooksInput,
+    ClaudeIntegrationStatus, ClaudePrivacySnapshot, ClaudeRuntimePaths, ClaudeSessionSummary,
+    ClaudeToolCallSummary, InstallClaudeHooksInput,
 };
 pub use code_state::CodeState;
 pub use db::{run_migrations, Database, DatabaseHealth, Migration, MigrationReport, MIGRATIONS};

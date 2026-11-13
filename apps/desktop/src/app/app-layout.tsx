@@ -1,5 +1,6 @@
 import {
   Database,
+  DatabaseBackup,
   FolderGit2,
   History,
   LayoutDashboard,
@@ -26,6 +27,7 @@ const navigation = [
     badge: "awaiting",
   },
   { to: "/recovery", label: "恢复", icon: History, end: false, badge: null },
+  { to: "/data-protection", label: "数据保护", icon: DatabaseBackup, end: false, badge: null },
   { to: "/diagnostics", label: "诊断", icon: Database, end: false, badge: null },
   { to: "/settings", label: "设置", icon: Settings, end: false, badge: null },
 ] as const;
@@ -132,7 +134,7 @@ export function AppLayout() {
                 {appInfo.isPending ? "…" : appInfo.data ? `v${appInfo.data.version}` : "—"}
               </span>
             </div>
-            <p className="mt-0.5 text-[10px] text-muted-foreground/80">Phase 5 · 记忆与恢复</p>
+            <p className="mt-0.5 text-[10px] text-muted-foreground/80">Phase 6 · 数据保护</p>
           </div>
         </aside>
 

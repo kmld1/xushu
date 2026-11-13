@@ -43,6 +43,21 @@ impl ApiError {
                     "恢复上下文生成或读取失败，请重新生成后重试",
                 )
             }
+            CoreError::Backup(message) => Self::new("BACKUP_ERROR", message),
+            CoreError::BackupCancelled => Self::new(
+                "BACKUP_CANCELLED",
+                "备份已取消，未保留可误认成有效备份的文件",
+            ),
+            CoreError::Restore(message) => Self::new("RESTORE_ERROR", message),
+            CoreError::RestoreConfirmationRequired => Self::new(
+                "RESTORE_CONFIRMATION_REQUIRED",
+                "需要输入确认文本并勾选风险确认后才能执行恢复",
+            ),
+            CoreError::UnsafePath => Self::new(
+                "UNSAFE_PATH",
+                "所选路径不是可安全使用的本地目录（可能是符号链接、Junction、UNC 或相对路径）",
+            ),
+            CoreError::Compatibility(message) => Self::new("BACKUP_INCOMPATIBLE", message),
             CoreError::Unavailable => Self::new("DATABASE_UNAVAILABLE", "本地数据库尚未就绪"),
             CoreError::LockPoisoned => {
                 Self::new("DATABASE_LOCK_ERROR", "本地数据库连接暂时不可用，请重试")
@@ -51,7 +66,11 @@ impl ApiError {
                 "SCHEMA_TOO_NEW",
                 "本地数据库版本高于当前应用支持的版本，请升级应用",
             ),
-            CoreError::Database(_) | CoreError::Io(_) | CoreError::InvalidMigration(_) => {
+            CoreError::Io(_) => Self::new(
+                "IO_ERROR",
+                "文件操作失败，请检查目标目录权限、文件占用或磁盘空间后重试",
+            ),
+            CoreError::Database(_) | CoreError::InvalidMigration(_) => {
                 eprintln!("[xushu] internal database error: code={code}");
                 Self::new("DATABASE_ERROR", "本地数据库操作失败，请稍后重试")
             }

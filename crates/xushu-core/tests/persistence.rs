@@ -28,7 +28,7 @@ fn opens_database_with_safe_pragmas_and_migrations() {
     assert!(health.foreign_keys_enabled);
     assert!(!health.foreign_key_violations);
     assert_eq!(health.journal_mode.to_ascii_lowercase(), "wal");
-    assert_eq!(health.schema_version, 6);
+    assert_eq!(health.schema_version, 7);
     assert_eq!(health.record_count, 0);
     assert_eq!(health.database_file, "xushu.db");
 }
@@ -39,8 +39,8 @@ fn migrations_are_idempotent() {
     let report = database.migrate().expect("repeat migrations");
 
     assert_eq!(report.applied, Vec::<i64>::new());
-    assert_eq!(report.current_version, 6);
-    assert_eq!(database.health().expect("health").schema_version, 6);
+    assert_eq!(report.current_version, 7);
+    assert_eq!(database.health().expect("health").schema_version, 7);
 }
 
 #[test]
@@ -269,7 +269,7 @@ fn list_limit_is_validated() {
 }
 
 #[test]
-fn phase5_migration_preserves_phase4_data() {
+fn phase5_and_phase6_migrations_preserve_phase4_data() {
     let directory = TempDir::new().expect("create temp directory");
     let mut connection =
         Connection::open(directory.path().join("phase4.db")).expect("open raw connection");
@@ -293,9 +293,9 @@ fn phase5_migration_preserves_phase4_data() {
         )
         .expect("seed phase 4 data");
 
-    let phase_five = run_migrations(&mut connection, MIGRATIONS).expect("apply phase 5 migration");
-    assert_eq!(phase_five.applied, vec![6]);
-    assert_eq!(phase_five.current_version, 6);
+    let phase_six = run_migrations(&mut connection, MIGRATIONS).expect("apply later migrations");
+    assert_eq!(phase_six.applied, vec![6, 7]);
+    assert_eq!(phase_six.current_version, 7);
 
     let project_count: i64 = connection
         .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))
@@ -321,6 +321,27 @@ fn phase5_migration_preserves_phase4_data() {
         )
         .expect("new table count");
     assert_eq!(new_table_count, 6);
+
+    let phase_six_table_count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name IN (
+                'backup_records', 'backup_settings', 'restore_operations'
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .expect("phase 6 table count");
+    assert_eq!(phase_six_table_count, 3);
+
+    let backup_settings_count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM backup_settings WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("backup settings row");
+    assert_eq!(backup_settings_count, 1);
 }
 
 #[test]
@@ -335,5 +356,5 @@ fn database_creates_nested_parent_directories() {
     let database = Database::open(&database_path).expect("open nested database");
 
     assert!(database_path.exists());
-    assert_eq!(database.health().expect("health").schema_version, 6);
+    assert_eq!(database.health().expect("health").schema_version, 7);
 }

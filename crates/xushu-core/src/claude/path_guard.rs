@@ -2,7 +2,7 @@ use std::fs::{self, File, Metadata, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub(super) struct Directories {
+pub(crate) struct Directories {
     // On Windows these handles deny renaming or deleting the checked directories.
     _handles: Vec<File>,
     pub identity: String,
@@ -42,11 +42,11 @@ impl Directories {
     }
 }
 
-pub(super) fn unsafe_path() -> io::Error {
+pub(crate) fn unsafe_path() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, "unsafe settings path")
 }
 
-pub(super) fn redirected(metadata: &Metadata) -> bool {
+pub(crate) fn redirected(metadata: &Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -80,7 +80,7 @@ fn open_directory(path: &Path) -> io::Result<File> {
     File::open(path)
 }
 
-pub(super) fn regular_file_options() -> OpenOptions {
+pub(crate) fn regular_file_options() -> OpenOptions {
     let mut options = OpenOptions::new();
     #[cfg(windows)]
     {
@@ -97,7 +97,7 @@ pub(super) fn regular_file_options() -> OpenOptions {
 }
 
 #[cfg(windows)]
-pub(super) fn identity(file: &File) -> io::Result<String> {
+pub(crate) fn identity(file: &File) -> io::Result<String> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
         FileIdInfo, GetFileInformationByHandleEx, FILE_ID_INFO,
@@ -148,7 +148,7 @@ mod tests {
 }
 
 #[cfg(unix)]
-pub(super) fn identity(file: &File) -> io::Result<String> {
+pub(crate) fn identity(file: &File) -> io::Result<String> {
     use std::os::unix::fs::MetadataExt;
     let metadata = file.metadata()?;
     Ok(format!("{:x}:{:x}", metadata.dev(), metadata.ino()))

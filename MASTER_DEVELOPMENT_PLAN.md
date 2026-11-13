@@ -345,6 +345,13 @@ xushu-hook 本地 CLI
 
 **验收门禁：** 完成安全测试矩阵；备份恢复真实演练；非法路径与未经批准执行被拒绝；日志无敏感原文；重大故障无无声失败。
 
+> **Phase 6 实施状态（2026-11-13）**。代码、迁移、受限 IPC、前端、自动化与隔离 Windows Tauri/WebView2 E2E 已完成；人工视觉、真实故障注入与生产化验收仍为 **PENDING**。 [Phase 6 报告](docs/phases/PHASE_6_REPORT.md) · [ADR-0009](docs/architecture/ADR/0009-backup-restore-data-protection.md) · [数据保护规范](docs/architecture/DATA_PROTECTION.md)
+>
+> - 已完成：迁移 7（`backup_records`、`backup_settings`、`restore_operations`）；SQLite Online Backup API 一致性快照；版本化 Manifest + SHA-256；备份校验/历史/删除/自动保留；只读预检 + 隔离恢复 + 一次性 token + 输入“恢复”+ 勾选 + 回退副本 + 受控切换 + 最终校验；恢复日志与启动自动回退；项目/任务/验收/验证/证据/Claude 元数据/记忆/决策/快照关系检查；Junction/符号链接/UNC 路径拒绝；数据资产清单、Hook 采集边界、未加密提示与完整性检查；一级“数据保护”页、创建/策略 Dialog、校验 Sheet、7 步恢复向导。
+> - 已验证：Rust workspace **186** 项、前端 **83** 项；真实 Tauri E2E 备份 → 校验 → 修改 → 预检 → 损坏备份拒绝 → 正式恢复 → 最终校验 → 关闭重开一致；500×480/1366×768/1600×900/1920×1080 与深浅主题无页面级横向溢出；正常数据库 DB/WAL/SHM 在每次 E2E 前后指纹一致。
+> - 未完成：人工视觉（`VISUAL_REVIEW_PENDING`）、真实故障注入（切换中杀进程/磁盘满/权限拒绝）、生产安装包与 sidecar、macOS/Linux、屏幕阅读器、真实 Windows 剪贴板、恢复后真实 Claude Code Hooks 复核。
+> - 边界：备份未加密；不包含 Hook Spool、Salt、项目 `.claude` 配置、导出报告或 WebView 偏好；恢复不自动修改 Hooks，不改变任务完成门禁；自动备份只在应用运行期间检查。
+
 ### Phase 7 — V1 实机验收与分发
 
 **工作：** Windows 全流程实机用例、打包安装器、干净环境运行验证、卸载影响说明、release notes、已知限制；macOS 编译可行性记录（若有真机再实测）。

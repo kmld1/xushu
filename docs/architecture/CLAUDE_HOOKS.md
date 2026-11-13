@@ -207,7 +207,16 @@ Phase 4.1 的执行结果见独立报告。以下步骤仅用于明确授权的�
 - **平台**：仅在 Windows 11 x64 + Claude Code 2.1.319 核对；macOS/Linux 与旧版本未验证。
 - **视觉**：未自动截图；人工视觉复核仍为 `VISUAL_REVIEW_PENDING`。
 
-## 10. 参考
+## 10. Phase 6 备份/恢复边界
+
+- 数据库备份只包含已导入的白名单 Hook 元数据；不包含 Hook 原始 JSON、Prompt、transcript、工具完整输入/输出、命令原文、Salt 或 Spool。
+- Hook Spool、Salt 与项目 `.claude` 配置不在数据库备份内，恢复不会重建、清理或替换它们。
+- 恢复数据库不会自动安装、停用、启用或卸载任何项目 Hooks；恢复预检与结果提示需要人工重新检查接入状态。
+- 恢复后如果 Spool 仍有待导入事件，下次刷新/启动导入会写入恢复后的数据库；这不是“恢复时实时导入”。
+- Hook 事件仍不是验收证据；恢复后的任务状态/完成门禁按备份时点数据库内容与后续独立验证决定。
+- 详细数据资产与威胁模型见 `docs/architecture/DATA_PROTECTION.md`，决策见 ADR-0009。
+
+## 11. 参考
 
 - Hooks reference：<https://code.claude.com/docs/en/hooks>
 - Hooks guide：<https://code.claude.com/docs/en/hooks-guide>

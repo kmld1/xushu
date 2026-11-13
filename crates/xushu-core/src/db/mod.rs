@@ -1,12 +1,14 @@
 mod migrations;
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::{SecondsFormat, Utc};
-use rusqlite::Connection;
+use rusqlite::backup::{Backup, StepResult};
+use rusqlite::{config::DbConfig, Connection, OpenFlags};
 use serde::Serialize;
 
 use crate::error::CoreError;
@@ -20,6 +22,7 @@ pub use migrations::{run_migrations, Migration, MigrationReport, MIGRATIONS};
 pub struct Database {
     conn: Mutex<Connection>,
     file_name: String,
+    path: PathBuf,
 }
 
 impl Database {
@@ -33,7 +36,18 @@ impl Database {
             }
         }
 
-        let conn = Connection::open(path)?;
+        Self::open_with_flags(path, OpenFlags::default())
+    }
+
+    pub(crate) fn open_existing(path: &Path) -> Result<Self, CoreError> {
+        Self::open_with_flags(path, OpenFlags::default() & !OpenFlags::SQLITE_OPEN_CREATE)
+    }
+
+    fn open_with_flags(path: &Path, flags: OpenFlags) -> Result<Self, CoreError> {
+        Self::from_connection(path, Connection::open_with_flags(path, flags)?)
+    }
+
+    pub(crate) fn from_connection(path: &Path, conn: Connection) -> Result<Self, CoreError> {
         Self::configure(&conn)?;
 
         let file_name = path
@@ -45,6 +59,7 @@ impl Database {
         let database = Self {
             conn: Mutex::new(conn),
             file_name,
+            path: path.to_path_buf(),
         };
         database.migrate()?;
         Ok(database)
@@ -52,6 +67,8 @@ impl Database {
 
     fn configure(conn: &Connection) -> Result<(), CoreError> {
         conn.busy_timeout(Duration::from_secs(5))?;
+        conn.set_db_config(DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, false)?;
+        conn.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
 
@@ -109,6 +126,103 @@ impl Database {
             record_count,
             database_file: self.file_name.clone(),
         })
+    }
+
+    /// 数据库主文件路径。仅 Rust 内部使用，不直接通过 IPC 暴露。
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// 将 WAL 内容合并回主数据库，用于受控关闭或文件切换前的准备。
+    pub fn checkpoint(&self) -> Result<(), CoreError> {
+        let conn = self.lock()?;
+        let busy: i64 = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))?;
+        if busy != 0 {
+            return Err(CoreError::Conflict(
+                "数据库 WAL 仍被其他连接占用".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Detect writes on this connection and commits made by other connections.
+    pub(crate) fn change_stamp(&self) -> Result<(u64, i64), CoreError> {
+        let conn = self.lock()?;
+        let external_version = conn.query_row("PRAGMA data_version", [], |row| row.get(0))?;
+        Ok((conn.total_changes(), external_version))
+    }
+
+    /// 将数据库整理为单一自包含文件（WAL 合并、切回 DELETE 日志模式）。
+    ///
+    /// 只用于隔离副本或备份快照，不用于正在被应用使用的正式数据库；正式数据库
+    /// 保持 WAL 以支持并发读取。
+    pub fn compact_for_backup(&self) -> Result<(), CoreError> {
+        let conn = self.lock()?;
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        let journal_mode: String =
+            conn.query_row("PRAGMA journal_mode = DELETE", [], |row| row.get(0))?;
+        if !journal_mode.eq_ignore_ascii_case("delete") {
+            return Err(CoreError::Backup(format!(
+                "无法将备份副本切换为单文件模式，当前 journal_mode={journal_mode}"
+            )));
+        }
+        Ok(())
+    }
+
+    /// 使用 SQLite Online Backup API 生成一致性快照。
+    ///
+    /// `destination` 必须是不存在的路径；调用方应写入临时目录，校验成功后再
+    /// 原子改名。备份在源数据库运行期间可安全执行，不能通过复制 `.db` 文件替代。
+    pub fn backup_to(&self, destination: &Path) -> Result<(), CoreError> {
+        self.backup_to_with_cancel(destination, &AtomicBool::new(false))
+    }
+
+    /// 可取消的一致性快照。取消时返回 `BackupCancelled`，不保证目标文件有效，
+    /// 调用方必须删除临时目录。
+    pub fn backup_to_with_cancel(
+        &self,
+        destination: &Path,
+        cancelled: &AtomicBool,
+    ) -> Result<(), CoreError> {
+        if destination.exists() {
+            return Err(CoreError::Conflict("备份目标文件已存在".to_owned()));
+        }
+
+        let conn = self.lock()?;
+        let mut destination_connection = Connection::open(destination)?;
+        destination_connection.busy_timeout(Duration::from_secs(5))?;
+        destination_connection.pragma_update(None, "synchronous", "FULL")?;
+
+        {
+            let backup = Backup::new(&conn, &mut destination_connection)?;
+            let mut lock_started: Option<Instant> = None;
+            loop {
+                if cancelled.load(Ordering::Relaxed) {
+                    return Err(CoreError::BackupCancelled);
+                }
+                match backup.step(128)? {
+                    StepResult::Done => break,
+                    StepResult::More => {
+                        lock_started = None;
+                    }
+                    StepResult::Busy | StepResult::Locked => {
+                        let started = *lock_started.get_or_insert_with(Instant::now);
+                        if started.elapsed() >= Duration::from_secs(30) {
+                            return Err(CoreError::Backup(
+                                "数据库持续被其他连接占用，无法完成一致性备份".to_owned(),
+                            ));
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        destination_connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        destination_connection.cache_flush()?;
+        drop(destination_connection);
+        Ok(())
     }
 
     /// 在事务中执行操作；闭包返回错误时不提交，由 SQLite 回滚。

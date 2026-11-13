@@ -48,6 +48,24 @@ pub enum CoreError {
     #[error("恢复上下文错误: {0}")]
     Recovery(String),
 
+    #[error("备份错误: {0}")]
+    Backup(String),
+
+    #[error("备份已取消")]
+    BackupCancelled,
+
+    #[error("恢复错误: {0}")]
+    Restore(String),
+
+    #[error("恢复需要明确的人工确认")]
+    RestoreConfirmationRequired,
+
+    #[error("文件路径未通过安全检查")]
+    UnsafePath,
+
+    #[error("备份兼容性错误: {0}")]
+    Compatibility(String),
+
     #[error("数据库 schema 版本 {found} 高于当前应用支持的 {supported}")]
     SchemaTooNew { found: i64, supported: i64 },
 
@@ -73,6 +91,12 @@ impl CoreError {
             Self::Verification(_) => "VERIFICATION_ERROR",
             Self::Claude(_) => "CLAUDE_INTEGRATION_ERROR",
             Self::Recovery(_) => "RECOVERY_ERROR",
+            Self::Backup(_) => "BACKUP_ERROR",
+            Self::BackupCancelled => "BACKUP_CANCELLED",
+            Self::Restore(_) => "RESTORE_ERROR",
+            Self::RestoreConfirmationRequired => "RESTORE_CONFIRMATION_REQUIRED",
+            Self::UnsafePath => "UNSAFE_PATH",
+            Self::Compatibility(_) => "BACKUP_INCOMPATIBLE",
             Self::SchemaTooNew { .. } => "SCHEMA_TOO_NEW",
             Self::InvalidMigration(_) => "MIGRATION_CONFIG_ERROR",
         }

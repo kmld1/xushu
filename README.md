@@ -10,6 +10,8 @@ XUSHU 不替代 Claude Code、编辑器或终端，也不把 AI 的“已完成�
 
 ## 当前状态
 
+**Phase 6（安全、隐私保护、数据备份与灾难恢复）：代码、迁移、受限 IPC、前端、自动化与隔离 Windows Tauri/WebView2 E2E PASS；人工视觉、真实故障注入与生产化验收 PENDING（2026-11-13）。** [Phase 6 报告](docs/phases/PHASE_6_REPORT.md) · [ADR-0009](docs/architecture/ADR/0009-backup-restore-data-protection.md) · [数据保护规范](docs/architecture/DATA_PROTECTION.md)
+
 **Phase 5（长期记忆、开发决策与跨会话恢复）：代码、迁移、自动化与隔离桌面 E2E PASS；人工视觉与产品化验收 PENDING（2026-11-12）。** [Phase 5 报告](docs/phases/PHASE_5_REPORT.md) · [ADR-0008](docs/architecture/ADR/0008-project-memory-decisions-recovery.md)
 
 **Phase 4（Claude Code Hooks 接入）：Windows 六种真实 Hooks 联调、已测功能和 E2E 数据隔离 PASS。Phase 4.3 补齐撤销采集与目录校验回归，整体验收仍为 PENDING。** [Phase 4.3 安全可靠性收尾](docs/phases/PHASE_4_3_SECURITY_CLOSEOUT.md)
@@ -62,6 +64,20 @@ XUSHU 不替代 Claude Code、编辑器或终端，也不把 AI 的“已完成�
 - 项目记忆与决策页面、项目详情摘要、任务详情关联、一级“恢复”页面；恢复指令预览与用户主动复制；
 - 迁移 6 纯追加表，旧 Phase 4 数据保留；记忆/决策/快照事务与项目隔离；重启后数据与快照一致；
 - 恢复包不依赖 AI，不读取 transcript/Prompt/工具输出，不扫描项目文件内容。
+
+**Phase 6 已完成的技术能力：**
+
+- 一致性备份：SQLite Online Backup API、WAL 合并、单文件快照、`.partial-*` 临时目录 + 同卷原子改名、失败/取消清理；
+- 备份格式 v1：`manifest.json` + `xushu.db`，应用/Schema/格式版本、备份 UUID、来源、大小、SHA-256；拒绝未知字段、路径穿越、未来 Schema、截断/损坏文件；
+- 完整校验：清单、SHA-256、隔离副本迁移、SQLite 完整性、外键、项目/任务/验收/验证/证据/Claude/记忆/决策/恢复快照关系；
+- 灾难恢复：只读预检 → 隔离恢复 → 15 分钟一次性 token + 输入“恢复”+ 勾选 → 回退副本 → 受控切换 → 最终校验；失败自动回退；
+- 恢复日志与启动恢复：prepared/switching/switched/completed；崩溃后优先回退原数据库；回退失败明确 `needs_manual`；
+- 备份策略：自动备份默认关闭；只在应用运行期间检查；自动保留只清理 automatic；手动备份永不自动删除；
+- 数据保护中心：备份历史、校验、恢复历史、完整性检查、数据资产清单、Hook 采集边界、Spool/Salt 边界、未加密提示、应用数据目录；
+- 路径安全：拒绝 UNC、相对路径、Junction、符号链接与重解析点祖先；文件打开不跟随链接；大小/容量上限；
+- 恢复不包含 Hook Spool、Salt、项目 `.claude` 配置、导出报告或 WebView 偏好；不会自动安装/停用 Hooks，不改变任务完成门禁。
+
+**Phase 6 待验收项**：数据保护页/创建备份/策略 Dialog/校验 Sheet/7 步恢复向导的人工视觉与键盘焦点；真实故障注入（切换中杀进程、磁盘满、权限拒绝、回退失败）；生产安装包与 sidecar；macOS/Linux；真实 Claude Code 恢复后复核。备份未加密，审计时不得把未校验备份或回退显示为成功恢复。
 
 **Phase 5 待验收项**：知识页/恢复页的浅色与深色人工视觉、500×480/1366×768/1600×900 实际截图、长文本与窄窗交互、键盘焦点；生产安装包与跨平台验证仍待后续阶段。
 
@@ -123,7 +139,7 @@ pnpm tauri dev
 ```
 
 首次编译需要下载并构建 Tauri/rusqlite 依赖，耗时较长。`pnpm build` 当前会产生约
-827 KB（gzip 246 KB）的单 chunk 及 >500 KB 提示；这是已知优化项，不影响功能。
+979 KB（gzip 280 KB）的单 chunk 及 >500 KB 提示；这是已知优化项，不影响功能。
 
 `xushu-hook.exe` 在开发模式下由 `cargo build -p xushu-hook` 生成；桌面程序从当前可执行文件同目录查找它。生产安装包的 sidecar 打包尚未完成（Phase 7），因此当前不要把开发版接入用于最终分发。
 
@@ -138,6 +154,7 @@ pnpm tauri dev
 7. **完成**：所有必需条件满足后，`标记完成` 才可用；失败、未运行、无法判定或过期证据都会阻止完成。
 8. **恢复**：重启应用后，项目、任务、条件、确认、验证运行与证据均保留。
 9. **Claude Code 接入（可选）**：项目详情 → “Claude Code 接入” → 查看预览并勾选确认 → 安装 Hooks。只写项目本地设置；事件只形成活动时间线，不改变任务状态。停用/卸载只删除 XUSHU 条目。真实联调请使用一次性测试项目，不要自动启用正在使用的项目。
+10. **数据保护**：一级导航“数据保护” → 创建备份（用户选择的本地目录）→ 校验备份 → 查看恢复历史与完整性。恢复必须先预检并查看影响范围；输入“恢复”并勾选后才能执行。备份未加密；恢复不包含 Hook Spool、Salt、项目配置或导出报告，也不会自动修改 Hooks。
 
 > 首版不通过 Shell，且拒绝 `cmd`、`powershell`、`sh` 与 `.cmd/.bat/.ps1` 包装器。
 > 测试脚本仍以当前用户权限运行，请只对可信项目配置验证。
@@ -147,27 +164,21 @@ pnpm tauri dev
 - 数据库文件：Tauri 应用数据目录下的 `xushu.db`。Windows 实测为
   `%APPDATA%\dev.xushu.desktop\xushu.db`。
 - 数据库及 WAL/SHM 文件不进入 Git 仓库，界面不展示绝对路径。
-- Schema 版本 4：
+- Schema 版本 7（迁移 1–7）：
   - `schema_migrations`
   - `persistence_probes`（Phase 1 诊断）
-  - `projects`
-  - `tasks`
-  - `acceptance_criteria`
-  - `task_transitions`
-  - `manual_confirmations`
-  - `verification_specs`（验证配置）
-  - `verification_runs`（运行记录与代码状态快照）
-  - `verification_checks`（真实判定）
-  - `evidence`（脱敏证据与内容摘要哈希）
-  - `claude_integrations`（项目级接入期望状态与安装版本）
-  - `claude_sessions`（伪名化会话）
-  - `claude_tool_calls`（工具调用聚合与未知/冲突状态）
-  - `claude_events`（最小事件账本，无原始 payload）
+  - `projects`、`tasks`、`acceptance_criteria`、`task_transitions`、`manual_confirmations`
+  - `verification_specs`、`verification_runs`、`verification_checks`、`evidence`
+  - `claude_integrations`、`claude_sessions`、`claude_tool_calls`、`claude_events`（Phase 4/5；无原始 payload）
+  - `project_memories`、`project_memory_revisions`、`decisions`、`decision_revisions`、`project_recovery_preferences`、`recovery_snapshots`（Phase 5）
+  - `backup_records`、`backup_settings`、`restore_operations`（Phase 6）
 - 开启 `foreign_keys`、WAL、`synchronous=NORMAL` 和 5 秒 busy timeout。
 - 迁移在事务中执行，失败回滚；重复执行幂等；数据库版本高于当前应用时拒绝降级。
 - 项目/任务归档为软归档；移除不删除磁盘文件或历史数据。
 - Claude Hook spool、盐与设置备份位于应用数据目录 `hook-inbox/`、`hook-backups/`；不进入仓库，不通过 IPC 暴露盐或原始 Hook JSON。
 - Hook 事件保留 30 天、每项目最多 5000 条；待导入文件每项目上限 1000 条。
+- 备份目录由用户选择；每个备份只含 `manifest.json` 与 `xushu.db`。当前备份**未加密**，不包含 Hook Spool、Salt、项目 `.claude` 配置、`exports/` 或 WebView 偏好。
+- 恢复回退目录 `restore-rollback/`、恢复日志 `restore-journal.json` 与隔离工作区 `restore-workspaces/` 位于应用数据目录；回退文件不自动删除。
 
 ## 工程结构
 
@@ -182,23 +193,29 @@ D:\MyProject\xushu\
 │   │   │   ├── tasks/               任务 API、表单、验收条件、状态操作
 │   │   │   ├── verification/        验证配置、批准、运行状态、证据、历史、报告
 │   │   │   ├── claude/              Claude Code 接入状态、安装预览、活动时间线
+│   │   │   ├── knowledge/           项目记忆、开发决策、修订历史
+│   │   │   ├── recovery/            跨会话恢复包、复制指令、历史快照
+│   │   │   ├── data-protection/     数据保护、创建备份、策略、校验、恢复向导、隐私清单
 │   │   │   ├── workspace/           当前项目、Signal Rail
 │   │   │   ├── system/              应用信息与数据库健康
 │   │   │   └── persistence/         Phase 1 持久化探针
-│   │   ├── pages/                   工作台、项目、项目详情、任务、任务详情、验收中心、诊断、设置
+│   │   ├── pages/                   工作台、项目、任务、验收中心、恢复、数据保护、诊断、设置
 │   │   ├── lib/                     IPC、领域类型、格式化、验证展示、Zod 辅助
 │   │   └── stores/                  主题、当前项目 Zustand
 │   ├── src-tauri/
 │   │   ├── src/commands.rs          Phase 1 五个命令
 │   │   ├── src/business_commands.rs 项目/任务/验收/验证/工作台命令
 │   │   ├── src/claude_commands.rs   Claude Code 接入/活动/安装/停用命令
-│   │   ├── src/state.rs             数据库、后台验证线程、Claude 运行时与取消注册表
+│   │   ├── src/knowledge_commands.rs 记忆/决策命令
+│   │   ├── src/recovery_commands.rs 恢复包命令
+│   │   ├── src/data_protection_commands.rs 备份/恢复/隐私命令
+│   │   ├── src/state.rs             数据库、后台验证线程、Claude 运行时、备份/恢复互斥与预检令牌
 │   │   ├── src/window_chrome.rs     自定义窗口边缘与 Snap 覆盖层（Windows）
 │   │   └── capabilities/default.json
 │   └── components.json
 ├── crates/xushu-core/
-│   ├── migrations/                  迁移 1（探针）+ 2（业务表）+ 3（验证引擎）+ 4（Claude Hooks）
-│   ├── src/db/                      数据库、PRAGMA、迁移、事务、健康检查
+│   ├── migrations/                  迁移 1–7（探针、业务、验证、Hooks、记忆/恢复、备份/恢复）
+│   ├── src/db/                      数据库、PRAGMA、迁移、事务、健康检查、Online Backup API
 │   ├── src/git.rs                   只读 Git 检查（参数数组、超时、输出上限）
 │   ├── src/code_state.rs            HEAD/分支/工作区内容指纹
 │   ├── src/runner.rs                后台进程、超时、取消、Windows Job Object
@@ -209,14 +226,16 @@ D:\MyProject\xushu\
 │   ├── src/state_machine.rs         状态转换图
 │   ├── src/models.rs                领域模型
 │   ├── src/claude/                  Hooks 配置、spool 导入、会话/工具状态与活动查询
-│   └── tests/                       持久化 + 业务 + 验证 + Claude 集成测试
+│   ├── src/backup/                  清单、路径安全、完整性、备份服务、恢复/回退、数据保护总览
+│   └── tests/                       持久化 + 业务 + 验证 + Claude + 记忆/决策/恢复 + 备份/恢复测试
 ├── crates/xushu-hook-protocol/      Hook 白名单协议、带盐哈希与信封校验
 ├── crates/xushu-hook/               本地 Hook CLI（独立可执行文件）
 ├── docs/
-│   ├── architecture/ADR/            0001 技术栈、0002 SQLite/IPC、0003 项目/任务/状态机、0004 验收引擎、0005/0006 窗口外壳、0007 Claude Hooks
+│   ├── architecture/ADR/            0001 技术栈 … 0007 Claude Hooks、0008 记忆/决策/恢复、0009 备份/恢复/数据保护
+│   ├── architecture/DATA_PROTECTION.md 数据资产、威胁模型、备份格式与恢复规范
 │   ├── design/DESIGN_SYSTEM.md      XUSHU 设计系统
 │   ├── design/UI_AUDIT.md           UI 审计与人工视觉验收状态
-│   └── phases/                      Phase 0/1/2/3/4 报告
+│   └── phases/                      Phase 0–6 报告与独立审计
 ├── Cargo.toml / Cargo.lock
 ├── package.json / pnpm-workspace.yaml / pnpm-lock.yaml
 └── rust-toolchain.toml
@@ -224,7 +243,7 @@ D:\MyProject\xushu\
 
 ## 设计系统与视觉验收
 
-- 统一设计系统：[`docs/design/DESIGN_SYSTEM.md`](docs/design/DESIGN_SYSTEM.md)（v2.1 / Integrated Window Workspace）
+- 统一设计系统：[`docs/design/DESIGN_SYSTEM.md`](docs/design/DESIGN_SYSTEM.md)（v2.4 / Phase 6 数据保护）
 - UI 审计：[`docs/design/UI_AUDIT.md`](docs/design/UI_AUDIT.md)
 - Phase 3.5 重设计报告：[`docs/design/UI_REDESIGN_PHASE_3_5.md`](docs/design/UI_REDESIGN_PHASE_3_5.md)
 - Phase 3.6 窗口一体化报告：[`docs/design/UI_REDESIGN_PHASE_3_6.md`](docs/design/UI_REDESIGN_PHASE_3_6.md)
@@ -245,6 +264,9 @@ D:\MyProject\xushu\
 - 状态机、证据有效性与完成门禁只在 Rust 实现；前端只展示后端返回的允许转换与 blockers。
 - CSP 保持生产/开发两套策略；生产 `script-src 'self'`。
 - 不读取或输出 API Key、`.env`、SSH 私钥、token 等敏感信息。
+- 备份使用 SQLite Online Backup API；运行时不复制 `.db`；清单只允许一个 `xushu.db` 相对路径；拒绝 UNC、Junction、符号链接、路径穿越与未来 Schema。
+- 恢复必须经过只读预检、隔离验证、一次性 token、输入“恢复”、勾选确认、回退副本、受控切换与最终校验；失败优先回退，启动时检查恢复日志。
+- 备份未加密；不包含 Hook Spool、Salt、项目 `.claude` 配置、导出报告或 WebView 偏好；恢复不自动修改 Hooks。
 - 不展示虚假项目、任务、KPI 或自动验收 PASS。
 
 ## 文档
@@ -258,10 +280,17 @@ D:\MyProject\xushu\
 - [ADR-0004](docs/architecture/ADR/0004-independent-verification-engine.md)
 - [ADR-0005](docs/architecture/ADR/0005-native-window-integrated-shell.md)（已被 ADR-0006 取代）
 - [ADR-0006](docs/architecture/ADR/0006-custom-titlebar-window-chrome.md)
+- [ADR-0007](docs/architecture/ADR/0007-claude-code-hooks-integration.md)
+- [ADR-0008](docs/architecture/ADR/0008-project-memory-decisions-recovery.md)
+- [ADR-0009](docs/architecture/ADR/0009-backup-restore-data-protection.md)
+- [数据保护规范](docs/architecture/DATA_PROTECTION.md)
 - [Phase 0 报告](docs/phases/PHASE_0_REPORT.md)
 - [Phase 1 报告](docs/phases/PHASE_1_REPORT.md)
 - [Phase 2 报告](docs/phases/PHASE_2_REPORT.md)
 - [Phase 3 报告](docs/phases/PHASE_3_REPORT.md)
+- [Phase 4 报告](docs/phases/PHASE_4_REPORT.md)
+- [Phase 5 报告](docs/phases/PHASE_5_REPORT.md)
+- [Phase 6 报告](docs/phases/PHASE_6_REPORT.md)
 - [设计系统](docs/design/DESIGN_SYSTEM.md)
 - [UI 审计](docs/design/UI_AUDIT.md)
 - [Phase 3.5 UI 重设计报告](docs/design/UI_REDESIGN_PHASE_3_5.md)

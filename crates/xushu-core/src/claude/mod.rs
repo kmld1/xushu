@@ -8,7 +8,7 @@
 //! 本模块从不修改任务状态、验收证据或完成门禁。Hook 事件只是观察记录。
 
 mod ingest;
-mod path_guard;
+pub(crate) mod path_guard;
 mod service;
 mod settings;
 
@@ -23,6 +23,17 @@ use xushu_hook_protocol::{initialize_salt, is_link_or_reparse, SALT_FILE_NAME};
 use crate::error::CoreError;
 
 pub use service::ClaudeIntegrationService;
+
+/// 面向隐私与数据保护页面的 Hook 运行时摘要；不包含 Salt 内容或事件原文。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudePrivacySnapshot {
+    pub pending_event_count: usize,
+    pub pending_bytes: u64,
+    pub salt_present: bool,
+    pub salt_bytes: u64,
+    pub inbox_available: bool,
+}
 
 pub const EVENT_RETENTION_DAYS: i64 = 30;
 pub const MAX_EVENTS_PER_PROJECT: i64 = 5_000;
@@ -298,6 +309,56 @@ impl ClaudeRuntimePaths {
         let mut hasher = Sha256::new();
         hasher.update(bytes);
         Some(to_hex(&hasher.finalize()))
+    }
+
+    /// 只扫描应用自有 Spool 的目录项与文件大小，不读取事件内容。
+    pub fn privacy_snapshot(&self) -> ClaudePrivacySnapshot {
+        let salt_path = self.inbox_dir.join(SALT_FILE_NAME);
+        let salt_present = salt_path.is_file() && !is_link_or_reparse(&salt_path);
+        let salt_bytes = if salt_present {
+            fs::metadata(&salt_path).map(|m| m.len()).unwrap_or(0)
+        } else {
+            0
+        };
+        let inbox_available = self.inbox_available();
+        let pending_root = self.inbox_dir.join("pending");
+        let mut pending_event_count = 0_usize;
+        let mut pending_bytes = 0_u64;
+        if !is_link_or_reparse(&pending_root) {
+            if let Ok(projects) = fs::read_dir(&pending_root) {
+                for project in projects.flatten() {
+                    let path = project.path();
+                    if is_link_or_reparse(&path) || !path.is_dir() {
+                        continue;
+                    }
+                    if let Ok(entries) = fs::read_dir(&path) {
+                        for entry in entries.flatten() {
+                            let entry_path = entry.path();
+                            if is_link_or_reparse(&entry_path) {
+                                continue;
+                            }
+                            let is_json = entry_path
+                                .extension()
+                                .and_then(|value| value.to_str())
+                                .is_some_and(|value| value == "json");
+                            if !is_json {
+                                continue;
+                            }
+                            pending_event_count += 1;
+                            pending_bytes +=
+                                entry.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+                        }
+                    }
+                }
+            }
+        }
+        ClaudePrivacySnapshot {
+            pending_event_count,
+            pending_bytes,
+            salt_present,
+            salt_bytes,
+            inbox_available,
+        }
     }
 }
 

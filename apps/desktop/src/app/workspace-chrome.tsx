@@ -37,6 +37,9 @@ function pageTitle(pathname: string) {
   if (pathname === "/recovery" || pathname.startsWith("/recovery/")) {
     return "恢复";
   }
+  if (pathname === "/data-protection" || pathname.startsWith("/data-protection/")) {
+    return "数据保护";
+  }
   if (pathname === "/diagnostics" || pathname.startsWith("/diagnostics/")) {
     return "诊断";
   }
