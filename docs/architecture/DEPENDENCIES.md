@@ -1,6 +1,6 @@
 # 依赖与工具链基线
 
-> 状态：**Phase 6 代码、迁移、IPC、前端、自动化与隔离桌面 E2E PASS；人工视觉、真实故障注入与生产安装包 PENDING/NOT_RUN**（2026-11-13）。
+> 当前 Windows x64 `0.1.1` 候选已通过 Phase 7 宿主门禁，Rust 213 项和前端 84 项通过，NSIS 构建及载荷核验通过（2026-11-18，北京时间）。代码签名仍待配置，Phase 7A.4 来宾及原始现场验收保持 `VALIDATION_PENDING`。
 >
 > 报告：`docs/phases/PHASE_6_REPORT.md`。本文件只记录实际安装、实际锁定并通过检查的版本。依赖升级必须重新生成
 > `pnpm-lock.yaml` / `Cargo.lock`，并复跑文末质量门禁。
@@ -141,6 +141,10 @@
 20. Phase 4 没有新增 Tauri capability 或插件；新增的七个 Claude IPC 命令都是应用自定义 command，前端仍无通用 FS/Shell/SQL 权限。
 21. Phase 6 只启用 `rusqlite` 的 `backup` feature；`Cargo.lock` 未新增第三方 crate/版本。`xushu-desktop` 新增的直接依赖 `chrono 0.4.45`、`uuid 1.29.0` 原本已在锁文件中（来自 `xushu-core`），版本不变。
 22. Phase 6 未新增 Tauri capability、插件或前端依赖；新增的 15 个数据保护命令都是应用自定义 command。前端仍无通用 SQL、Shell、任意文件系统写入或系统配置修改权限。
+23. 当前 Windows MSVC 发布由 `pnpm release:windows` 触发 Tauri 的 `beforeBuildCommand`，其中 `pnpm sidecar:prepare` 调用 `scripts/prepare-sidecar.mjs`。脚本用 `cargo rustc --locked --release -p xushu-hook -- -C target-feature=+crt-static` 构建接收器，有指定的编译目标时在 `--` 前加入 `--target <triple>`。生成文件暂存为 `apps/desktop/src-tauri/binaries/xushu-hook-<triple>.exe`，供 Tauri `externalBin` 打包。未引入 `tauri-plugin-shell`、`withGlobalTauri` 或新的 capability。
+24. Phase 7A 未新增第三方 crate 或前端包；Release profile 只调整 Cargo 优化/LTO/strip。NSIS 3.13 与 nsis_tauri_utils 0.5.3 由 Tauri CLI 下载并校验，不属于应用运行时依赖。
+25. Windows 安装包为 currentUser NSIS；WebView2 使用 `downloadBootstrapper`（安装时检测，缺失则静默运行官方 bootstrapper，需要联网）。未嵌入固定 WebView2 运行时。
+26. 安装版主程序与 sidecar 版本必须一致；启动探测只执行固定的 `--version` 参数，不经过 shell。该探测不新增 IPC 命令或前端权限。
 
 ## 5. 锁文件与复现策略
 
@@ -173,7 +177,7 @@
 - CSP：
   - 生产：`default-src 'self'; connect-src ipc: http://ipc.localhost; ...; script-src 'self'; object-src 'none'; base-uri 'self'`
   - 开发：额外允许 `ws://localhost:1420/1421` 与 Vite 内联 refresh 脚本。
-  - 生产 CSP 尚未用 `tauri build` 成品运行验证，属于遗留验证项。
+  - 生产 CSP 已在 Phase 7A 安装版 E2E 中实际加载页面并通过 CDP 调用 Tauri IPC；未放宽 `script-src`。
 
 ## 7. 本轮实际通过的质量门禁（2026-11-09）
 
@@ -210,17 +214,46 @@
 | 隔离 Tauri E2E（关闭重开） | 0 | 恢复后快照重开一致；正常 DB/WAL/SHM 指纹不变 |
 | 隔离 Tauri E2E（布局/主题） | 0 | 4 视口 × 深浅主题 + 恢复向导；无页面级横向溢出 |
 
+### 7.2 历史 Phase 7A 实际质量门禁（2026-11-14）
+
+| 命令/构建 | 退出码 | 结果 |
+|---|---|---|
+| `pnpm install --frozen-lockfile` | 0 | 锁文件一致；供应链策略通过 |
+| `pnpm typecheck` | 0 | 通过 |
+| `pnpm lint` | 0 | ESLint 10，`--max-warnings 0` |
+| `pnpm test` | 0 | 11 个文件、**83** 项通过 |
+| `pnpm build` | 0 | Vite 通过；单 chunk **980.05 kB / gzip 280.77 kB**（原有 >500 kB 提示） |
+| `pnpm format` | 0 | Prettier 通过 |
+| `cargo fmt --all -- --check` | 0 | 通过 |
+| `cargo check --workspace --all-targets --locked` | 0 | 通过 |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | 0 | 无警告 |
+| `cargo test --workspace --locked` | 0 | **207** 项通过，0 失败，0 ignored |
+| `pnpm release:windows`（Tauri NSIS） | 0 | Release + `XUSHU_0.1.0_x64-setup.exe`；安装包 3,304,035 B |
+| 隔离安装版 E2E | 0 | 安装/首启/重开/非正常退出/升级 0.1.1/sidecar 异常/窗口/卸载；正常 DB 指纹不变 |
+| `git diff --check` | 0 | 无空白错误 |
+
+- 测试构成：core lib 33、backup 22、business 19、claude 37、decisions 8、memory 8、persistence 13、recovery 14、verification 26、desktop lib 14、hook CLI 8、hook protocol 5 = **207**。
+- Release profile：`codegen-units = 1`、`lto = true`、`opt-level = "s"`、`strip = true`；本机 Release 构建约 2m35s–3m06s，主程序约 11 MB。
+- Tauri CLI 首次打包下载并校验 **NSIS 3.13** 与 **nsis_tauri_utils 0.5.3**；当时使用 Windows 用户工具缓存 `%LOCALAPPDATA%\tauri`。Phase 7 的 `0.1.1` 宿主构建通过 `bundle.useLocalToolsDir=true` 使用隔离的 `cargo-target/.tauri/NSIS/`。两处缓存均在提交范围外。
+- 产物：`target/phase7a/production/XUSHU_0.1.0_x64-setup.exe`（SHA-256 `3bf2143f…`）、`xushu-desktop.exe`（`fb2d23ef…`）；隔离 E2E 包 0.1.0 `e6f771e6…`、0.1.1 `f675e465…`。
+- 代码签名：`SIGNING_NOT_CONFIGURED`（Authenticode 检查结果为未签名）。
+
 ## 8. 已规划但本阶段未安装
 
-- 生产安装包的 `xushu-hook` sidecar 打包与升级路径（Phase 7）
 - 备份加密与密钥管理依赖（未进入 Phase 6；需要新 ADR）
 - 常驻自动备份调度/系统计划任务（未进入 Phase 6；当前仅应用运行期间检查）
-- 安装包、签名与分发工具（Phase 7）
+- Windows 代码签名证书、时间戳服务与发布签名工具（Phase 7B）
+- 自动更新签名、元数据与发布基础设施（未启用）
+- MSI/WiX 打包（Phase 7A 只验证 NSIS）
+- macOS `.app`/DMG、公证与 arm64 sidecar（Phase 7B）
 
-## 9. 官方参考（核对日期：2026-11-09）
+## 9. 官方参考（核对日期：2026-11-14）
 
 - Tauri prerequisites：<https://v2.tauri.app/start/prerequisites/>
 - Tauri 2.12 发布说明：<https://v2.tauri.app/blog/tauri-2.12/>
+- Tauri 嵌入外部二进制（externalBin）：<https://v2.tauri.app/develop/sidecar/>
+- Tauri Windows 安装包与 WebView2：<https://v2.tauri.app/distribute/windows-installer/>
+- Tauri 配置 schema（2.12.4 本地 `config.schema.json` 核对）
 - Tauri capabilities：<https://v2.tauri.app/security/capabilities/>
 - Tauri CSP：<https://v2.tauri.app/security/csp/>
 - SQLite WAL：<https://www.sqlite.org/wal.html>

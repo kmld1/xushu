@@ -77,6 +77,15 @@
 - Hook 数据可能缺失，不得把“未见失败事件”解释为“成功”；会话结束事件缺失时必须显示“结束未确认”。
 - 数据库备份必须保证 SQLite WAL 一致性，并真实测试恢复。
 
+### Windows 生产打包与分发（Phase 7A 起）
+
+- 正式构建只使用 `pnpm release:windows`；`xushu-hook` 由 `scripts/prepare-sidecar.mjs` 以 `--locked` 编译并按 Tauri `externalBin` 规则打包。禁止手工复制 debug 二进制、禁止把 `target/debug` 或开发目录路径写入用户 Hook 配置。
+- 安装目录与用户数据目录必须分离。NSIS 使用 currentUser 安装；卸载默认不得删除 `%APPDATA%\dev.xushu.desktop` 中的数据库、备份、日志或项目目录。卸载不自动清理项目 `.claude` 配置，残留 XUSHU Hooks 必须由用户明确处理。
+- 主程序启动时只执行固定的 `xushu-hook --version` 探测；sidecar 缺失、损坏或版本不一致时必须报告接收器不可用，不得静默使用。sidecar 探测不经过 shell，不扩大 Tauri capability。
+- 生产日志写入应用数据目录 `logs/`，必须有界轮转，只记录固定事件名、错误码与计数；不得记录路径列表、SQL、令牌、Salt、Hook 原文、Prompt、transcript 或工具输入输出。
+- 安装版 E2E 必须使用 `dev.xushu.e2e.*` identifier、隔离 `appDirectoriesOverride` 与 `XUSHU_E2E_DATA_DIR`；不得打开、迁移或写入正常用户数据库。真实生产 identifier 的安装验收必须在独立 Windows 环境或用户明确授权后进行。
+- 未完成可信签名、升级元数据与发布基础设施前，不得启用自动更新；不得把未签名安装包称为可信发布版，也不得宣称 V1.0.0 已正式发布。
+
 ### UX
 
 - 页面优先：工作台、项目、任务详情、验收中心、事件/决策、断点恢复、设置。

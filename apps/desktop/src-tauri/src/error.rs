@@ -44,6 +44,7 @@ impl ApiError {
                 )
             }
             CoreError::Backup(message) => Self::new("BACKUP_ERROR", message),
+            CoreError::IsolatedPayload { detail, .. } => Self::new(code, detail),
             CoreError::BackupCancelled => Self::new(
                 "BACKUP_CANCELLED",
                 "备份已取消，未保留可误认成有效备份的文件",

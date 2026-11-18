@@ -21,8 +21,18 @@ pub fn get_app_info() -> AppInfo {
         name: xushu_core::APP_NAME.to_owned(),
         version: env!("CARGO_PKG_VERSION").to_owned(),
         tauri_version: tauri::VERSION.to_owned(),
-        phase: "Phase 6".to_owned(),
+        phase: "Phase 7A".to_owned(),
         platform: std::env::consts::OS.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_info_reports_the_current_productization_phase() {
+        assert_eq!(get_app_info().phase, "Phase 7A");
     }
 }
 

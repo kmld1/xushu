@@ -565,7 +565,8 @@ export function RestoreWizardSheet({
                   }}
                 />
                 <p className="text-[11px] leading-5 text-muted-foreground">
-                  可直接使用备份历史中的“恢复”入口。预检只读取备份并在隔离目录中验证，不修改当前数据库。
+                  粘贴包含 manifest.json 和 xushu.db 的目录完整路径。未登记的外部备份也可预检。
+                  预检只读取备份、在隔离目录中验证，当前数据库和备份列表保持原样。
                 </p>
               </div>
               {preflightError ? (

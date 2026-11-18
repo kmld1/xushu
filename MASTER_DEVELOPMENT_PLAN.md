@@ -358,6 +358,12 @@ xushu-hook 本地 CLI
 
 **验收门禁：** `创建项目 → 任务 → 验收 → 失败/成功报告 → 决策 → 重启恢复` 全链路通过；安装包实际运行；所有测试命令与结果可复核；没有把未进行的 macOS 测试写为通过。
 
+> **Phase 7A 实施状态（2026-11-14）**。Windows x64 Release、Tauri NSIS 安装包、`xushu-hook` externalBin、有界诊断日志与隔离安装版 E2E 已完成；正式签名、生产 identifier 实机安装、macOS 与自动更新仍 **PENDING/NOT_RUN**。 [Phase 7A 报告](docs/phases/PHASE_7A_REPORT.md) · [ADR-0010](docs/architecture/ADR/0010-windows-release-packaging.md)
+>
+> - 已完成：`pnpm release:windows` 正式构建入口；NSIS currentUser 安装包；主程序与 `xushu-hook.exe` 同目录分发；启动时 `--version` 一致性探测；`%APPDATA%\dev.xushu.desktop` 数据目录与安装目录分离；日志轮转与非正常退出检测；隔离 identifier 安装、升级、卸载与 sidecar 缺失/损坏/版本不一致验证。
+> - 未完成：Windows 代码签名（`SIGNING_NOT_CONFIGURED`）、生产 identifier 的干净环境安装验收、真实 Claude Code 会话联调、自动更新、MSI、macOS arm64、人工视觉签收。
+> - 边界：安装版 E2E 使用 `dev.xushu.e2e.phase7a` 与隔离数据目录，不打开正常用户数据库；卸载保留用户数据，但不会自动移除项目中的 XUSHU Hooks。
+
 > **阶段原则：** Phase 0/1 可先纯工程初始化；Phase 3 必须尽早产生真实产品价值。Phase 4 Hooks 属于可选事件来源，不能成为阶段 3 独立验收的前提。每次只实现当前阶段下一个最小闭环任务。
 
 ---

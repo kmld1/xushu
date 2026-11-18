@@ -1920,11 +1920,7 @@ fn validate_executable(raw: &str) -> Result<String, CoreError> {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(value);
-    let stem = file_name
-        .trim_end_matches(".exe")
-        .trim_end_matches(".com")
-        .to_ascii_lowercase();
-    if BANNED_SHELLS.contains(&stem.as_str()) {
+    if is_blocked_shell(file_name) {
         return Err(CoreError::Validation(format!(
             "首版禁止直接执行 Shell 可执行文件：{file_name}"
         )));
@@ -1947,6 +1943,15 @@ fn validate_executable(raw: &str) -> Result<String, CoreError> {
     }
 
     Ok(value.to_owned())
+}
+
+fn is_blocked_shell(file_name: &str) -> bool {
+    let normalized = file_name.to_ascii_lowercase();
+    let stem = normalized
+        .strip_suffix(".exe")
+        .or_else(|| normalized.strip_suffix(".com"))
+        .unwrap_or(&normalized);
+    BANNED_SHELLS.contains(&stem)
 }
 
 fn validate_arguments(args: Vec<String>) -> Result<Vec<String>, CoreError> {
@@ -2049,7 +2054,8 @@ fn display_path(path: PathBuf) -> String {
 
 /// 解析可执行程序的绝对路径；不经过 Shell，也不接受批处理包装器。
 pub(crate) fn resolve_executable(executable: &str) -> Option<PathBuf> {
-    let path = Path::new(executable);
+    let executable = validate_executable(executable).ok()?;
+    let path = Path::new(&executable);
     if path.is_absolute() {
         return safe_executable_path(path);
     }
@@ -2059,7 +2065,7 @@ pub(crate) fn resolve_executable(executable: &str) -> Option<PathBuf> {
 
     let search_path = std::env::var_os("PATH")?;
     for directory in std::env::split_paths(&search_path) {
-        if let Some(resolved) = safe_executable_path(&directory.join(executable)) {
+        if let Some(resolved) = safe_executable_path(&directory.join(&executable)) {
             return Some(resolved);
         }
 
@@ -2078,7 +2084,7 @@ pub(crate) fn resolve_executable(executable: &str) -> Option<PathBuf> {
 
 fn safe_executable_path(path: &Path) -> Option<PathBuf> {
     let canonical = path.canonicalize().ok()?;
-    if !canonical.is_file() {
+    if !canonical.is_file() || is_blocked_shell(canonical.file_name()?.to_str()?) {
         return None;
     }
 
@@ -2361,6 +2367,18 @@ mod tests {
             changed_file_count: 0,
             note: None,
         }
+    }
+
+    #[test]
+    fn direct_shell_names_are_rejected_without_starting_a_process() {
+        for name in ["cmd", "CMD.EXE", "PowerShell.Exe", "Bash.COM"] {
+            assert!(matches!(
+                validate_executable(name),
+                Err(CoreError::Validation(_))
+            ));
+            assert!(resolve_executable(name).is_none());
+        }
+        assert!(validate_executable("cargo.exe").is_ok());
     }
 
     #[test]

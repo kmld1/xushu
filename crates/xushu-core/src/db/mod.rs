@@ -44,12 +44,15 @@ impl Database {
     }
 
     fn open_with_flags(path: &Path, flags: OpenFlags) -> Result<Self, CoreError> {
-        Self::from_connection(path, Connection::open_with_flags(path, flags)?)
+        let conn = Connection::open_with_flags(path, flags)?;
+        Self::configure(&conn)?;
+        Self::from_configured_connection(path, conn)
     }
 
-    pub(crate) fn from_connection(path: &Path, conn: Connection) -> Result<Self, CoreError> {
-        Self::configure(&conn)?;
-
+    pub(crate) fn from_configured_connection(
+        path: &Path,
+        conn: Connection,
+    ) -> Result<Self, CoreError> {
         let file_name = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -65,7 +68,7 @@ impl Database {
         Ok(database)
     }
 
-    fn configure(conn: &Connection) -> Result<(), CoreError> {
+    pub(crate) fn configure(conn: &Connection) -> Result<(), CoreError> {
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.set_db_config(DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, false)?;
         conn.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;

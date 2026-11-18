@@ -488,3 +488,14 @@
 - 证据：`target/phase6-audit/phase6-e2e-result.json`、`phase6-reopen-result.json`、`phase6-layout.json`（已忽略目录）。
 - 人工视觉：**VISUAL_REVIEW_PENDING**。创建/策略 Dialog、校验 Sheet、恢复向导、隐私清单、150% 缩放、键盘焦点与真实剪贴板仍需用户手动截图/操作确认。
 - 未改变窗口控制、44px 工作带、Snap Overlay、侧栏宽度或其他页面结构；未新增 capability。
+
+## Phase 7A 安装版审计（2026-11-14）
+
+- 未新增或重排页面、组件、配色、字体、间距或窗口结构；未调用 `frontend-design` 重做设计。唯一可见变化是设置页“阶段”值由 Rust `get_app_info` 从 “Phase 6” 更新为 “Phase 7A”。
+- 安装版 E2E（隔离 identifier，真实 NSIS 安装）测量：
+  - 1100×720 窗口：工作带 44px、侧栏 240px、无横向溢出；数据保护页“数据库备份/数据完整性/Hook 待导入 Spool”可见。
+  - 500×480 窗口：工作带 44px、侧栏 52px、无横向溢出；`data-tauri-drag-region` 存在。
+  - 窗口最大化 → 还原 → 最小化 → 关闭均由真实安装版 IPC/原生状态验证；Snap Overlay 子窗口存在且 `WM_NCHITTEST` 返回 `HTMAXBUTTON (9)`。
+  - 当前环境 DPI 144、显示器 1 台。
+- 未自动截图/录屏。Windows Snap 实际悬停菜单、标题栏拖拽手感、多显示器、其他 DPI 与 150% 缩放的视觉检查仍为 **VISUAL_REVIEW_PENDING**；不得以自动化测量代替人工视觉签收。
+- 证据：`target/phase7a/installed-full-result.json`、`installed-window-result.json`、`installed-e2e-report.json`（已忽略目录）。

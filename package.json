@@ -17,6 +17,8 @@
     "format": "prettier --check .",
     "format:write": "prettier --write .",
     "tauri": "pnpm --filter @xushu/desktop tauri",
+    "sidecar:prepare": "node scripts/prepare-sidecar.mjs",
+    "release:windows": "pnpm --filter @xushu/desktop tauri build --bundles nsis",
     "rust:check": "cargo check --workspace --all-targets",
     "rust:fmt": "cargo fmt --all -- --check",
     "rust:clippy": "cargo clippy --workspace --all-targets -- -D warnings",

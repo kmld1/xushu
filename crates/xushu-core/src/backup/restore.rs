@@ -20,8 +20,8 @@ use super::integrity::{
     DataIntegrityReport, DataIntegrityService, IntegrityCheck, IntegrityStatus,
 };
 use super::manifest::{
-    open_isolated_payload, read_manifest, verify_payload, BackupManifest, BackupOrigin,
-    MANIFEST_FILE_NAME, MAX_BACKUP_BYTES, PAYLOAD_FILE_NAME,
+    isolated_failure_detail, open_isolated_payload, read_manifest, verify_payload, BackupManifest,
+    BackupOrigin, MANIFEST_FILE_NAME, MAX_BACKUP_BYTES, PAYLOAD_FILE_NAME,
 };
 use super::paths::{
     atomic_replace_file, capacity_ok, copy_regular_file_bounded, display_path, free_space_bytes,
@@ -385,9 +385,8 @@ impl<'a> RestoreService<'a> {
                 checks.push(failed_check(
                     "isolated_restore",
                     "隔离恢复验证",
-                    "隔离恢复无法完成：备份可能损坏、版本不兼容或数据关系不一致",
+                    &isolated_failure_detail(&error),
                 ));
-                let _ = error;
                 return Ok(RestorePreflightOutcome {
                     preflight: self.blocked_preflight(
                         &backup_directory,

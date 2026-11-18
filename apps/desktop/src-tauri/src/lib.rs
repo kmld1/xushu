@@ -4,17 +4,19 @@ mod commands;
 mod data_protection_commands;
 mod error;
 mod knowledge_commands;
+mod logging;
 mod recovery_commands;
 mod state;
 mod window_chrome;
 
-use tauri::Manager;
+use tauri::{Manager, RunEvent};
 
 use state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    logging::install_panic_hook();
+    let app = tauri::Builder::default()
         .setup(|app| {
             let data_directory = app.path().app_data_dir()?;
             let isolated_build = app.config().identifier.starts_with("dev.xushu.e2e.");
@@ -34,8 +36,8 @@ pub fn run() {
             app.manage(AppState::initialize(&data_directory));
 
             if let Some(window) = app.get_webview_window("main") {
-                if let Err(error) = window_chrome::install(&window) {
-                    eprintln!("无法安装窗口 Snap 覆盖层：{error}");
+                if window_chrome::install(&window).is_err() {
+                    logging::record("WARN", "window_snap_overlay_install_failed");
                 }
             }
 
@@ -121,6 +123,12 @@ pub fn run() {
             data_protection_commands::preflight_restore,
             data_protection_commands::perform_restore,
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("运行序枢 XUSHU 桌面程序失败");
+
+    app.run(|_, event| {
+        if let RunEvent::Exit = event {
+            logging::record("INFO", "app_exit");
+        }
+    });
 }

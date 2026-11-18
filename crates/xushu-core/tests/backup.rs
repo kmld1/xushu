@@ -360,6 +360,22 @@ fn backup_round_trip_preserves_business_rows_and_relations() {
     );
     assert_eq!(record.origin, BackupOrigin::Manual);
     assert_eq!(record.schema_version, 7);
+    let service = BackupService::new(&database, directory.path());
+    let verification = service.verify(&record.backup_id).expect("verify backup");
+    assert!(verification.verified, "{:?}", verification.checks);
+    let registered = service.list().expect("list registered backups");
+    assert_eq!(registered.len(), 1);
+    assert_eq!(registered[0].backup_id, record.backup_id);
+    let package = Path::new(&record.directory_path);
+    let manifest_hash = file_sha256(&package.join("manifest.json"));
+    let payload_hash = file_sha256(&package.join("xushu.db"));
+    let snapshot_rows = read_business_rows(
+        &Connection::open_with_flags(
+            package.join("xushu.db"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap(),
+    );
 
     let manifest =
         fs::read(Path::new(&record.directory_path).join("manifest.json")).expect("manifest bytes");
@@ -441,6 +457,35 @@ fn backup_round_trip_preserves_business_rows_and_relations() {
         .expect("finish journal");
 
     let connection = Connection::open(directory.path().join("xushu.db")).expect("read restored");
+    assert_eq!(read_business_rows(&connection), snapshot_rows);
+    assert_eq!(file_sha256(&package.join("manifest.json")), manifest_hash);
+    assert_eq!(file_sha256(&package.join("xushu.db")), payload_hash);
+
+    let restored_registry = BackupService::new(&reopened, directory.path());
+    assert!(restored_registry.list().unwrap().is_empty());
+    assert!(!restored_registry.policy().unwrap().automatic_enabled);
+    assert!(restored_registry
+        .policy()
+        .unwrap()
+        .target_directory
+        .is_none());
+    let external = open_preflight(&reopened, directory.path(), &record);
+    assert!(external.preflight.ready, "{:?}", external.preflight.checks);
+    assert!(restored_registry.list().unwrap().is_empty());
+    RestoreService::cleanup_plan_workspace(&external.plan.unwrap());
+    println!(
+        "NONEMPTY_RESTORE_EVIDENCE {}",
+        serde_json::json!({
+            "backupId": record.backup_id,
+            "manifestSha256": manifest_hash,
+            "payloadSha256": payload_hash,
+            "schemaVersion": report.schema_version,
+            "registryBeforeRestore": registered.len(),
+            "registryAfterRestore": 0,
+            "unregisteredBackupPreflightReady": external.preflight.ready,
+            "matchedRows": snapshot_rows,
+        })
+    );
     let project_name: String = connection
         .query_row(
             "SELECT name FROM projects WHERE id = ?1",
@@ -559,6 +604,53 @@ fn backup_round_trip_preserves_business_rows_and_relations() {
     drop(directory);
 }
 
+fn read_business_rows(connection: &Connection) -> Value {
+    let queries = [
+        ("projects", "SELECT id, name FROM projects ORDER BY id"),
+        (
+            "tasks",
+            "SELECT id, project_id, title, status FROM tasks ORDER BY id",
+        ),
+        (
+            "criteria",
+            "SELECT id, task_id, description, kind FROM acceptance_criteria ORDER BY id",
+        ),
+        (
+            "verificationRuns",
+            "SELECT id, task_id, criterion_id, execution_status FROM verification_runs ORDER BY id",
+        ),
+        (
+            "evidence",
+            "SELECT id, task_id, run_id, source_type, content_digest FROM evidence ORDER BY id",
+        ),
+        (
+            "memories",
+            "SELECT id, project_id, title, content FROM project_memories ORDER BY id",
+        ),
+        (
+            "decisions",
+            "SELECT id, project_id, title, status FROM decisions ORDER BY id",
+        ),
+    ];
+    let mut output = serde_json::Map::new();
+    for (name, query) in queries {
+        let mut statement = connection.prepare(query).unwrap();
+        let columns = statement.column_count();
+        let rows = statement
+            .query_map([], |row| {
+                (0..columns)
+                    .map(|index| row.get::<_, Option<String>>(index))
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(!rows.is_empty(), "fixture has no {name}");
+        output.insert(name.to_owned(), serde_json::json!(rows));
+    }
+    Value::Object(output)
+}
+
 #[test]
 fn tampered_payload_is_rejected_and_current_database_is_untouched() {
     let (_repo_root, repo) = init_repo();
@@ -641,8 +733,28 @@ fn corrupted_database_with_matching_hash_is_rejected_by_isolated_restore() {
     let digest = file_sha256(&payload);
     rewrite_manifest(&record, |manifest| {
         manifest["files"][0]["size"] = Value::from(corrupted.len() as u64);
-        manifest["files"][0]["sha256"] = Value::from(digest);
+        manifest["files"][0]["sha256"] = Value::from(digest.clone());
     });
+    Connection::open(database.path())
+        .unwrap()
+        .execute(
+            "UPDATE backup_records SET payload_sha256 = ?1 WHERE backup_id = ?2",
+            params![digest, record.backup_id],
+        )
+        .unwrap();
+
+    let verification = BackupService::new(&database, directory.path())
+        .verify(&record.backup_id)
+        .unwrap();
+    assert!(!verification.verified);
+    assert!(verification.checks.iter().any(|check| {
+        check.id == "sqlite_integrity"
+            && check.status == xushu_core::IntegrityStatus::Fail
+            && check
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("NotADatabase") && detail.contains("26"))
+    }));
 
     let outcome = open_preflight(&database, directory.path(), &record);
     assert!(!outcome.preflight.ready);
@@ -652,8 +764,88 @@ fn corrupted_database_with_matching_hash_is_rejected_by_isolated_restore() {
         .checks
         .iter()
         .any(|check| check.id == "isolated_restore"
-            && check.status == xushu_core::IntegrityStatus::Fail));
+            && check.status == xushu_core::IntegrityStatus::Fail
+            && check
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("NotADatabase"))));
     assert!(!directory.path().join("restore-journal.json").exists());
+}
+
+#[test]
+fn schema_v7_backup_with_other_platform_line_endings_can_be_reverified_and_restored() {
+    let directory = TempDir::new().expect("temp directory");
+    let path = directory.path().join("xushu.db");
+    {
+        let mut connection = Connection::open(&path).unwrap();
+        xushu_core::run_migrations(&mut connection, &[]).unwrap();
+        for migration in xushu_core::MIGRATIONS {
+            let sql = migration.sql.replace("\r\n", "\n");
+            let sql = if sql == migration.sql {
+                sql.replace('\n', "\r\n")
+            } else {
+                sql
+            };
+            let transaction = connection.transaction().unwrap();
+            transaction.execute_batch(&sql).unwrap();
+            transaction
+                .execute(
+                    "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, ?3)",
+                    params![migration.version, migration.name, "2026-11-15T00:00:00Z"],
+                )
+                .unwrap();
+            transaction
+                .pragma_update(None, "user_version", migration.version)
+                .unwrap();
+            transaction.commit().unwrap();
+        }
+    }
+    let database = Database::open(&path).unwrap();
+    let record = create_backup(&database, directory.path());
+    let package = Path::new(&record.directory_path);
+    let manifest_path = package.join("manifest.json");
+    let payload_path = package.join("xushu.db");
+    let manifest_hash = file_sha256(&manifest_path);
+    let payload_hash = file_sha256(&payload_path);
+    assert_eq!(record.schema_version, 7);
+    assert_eq!(record.payload_sha256, payload_hash);
+    drop(database);
+
+    let reopened = Database::open(&path).unwrap();
+    let verification = BackupService::new(&reopened, directory.path())
+        .verify(&record.backup_id)
+        .unwrap();
+    assert!(verification.verified, "{:?}", verification.checks);
+    assert!(verification.integrity.unwrap().ok);
+    let outcome = open_preflight(&reopened, directory.path(), &record);
+    assert!(outcome.preflight.ready, "{:?}", outcome.preflight.checks);
+    assert_eq!(outcome.preflight.manifest_sha256, manifest_hash);
+    let plan = outcome.plan.unwrap();
+    let _journal = switch_to_plan(reopened, directory.path(), &plan, "alternate-eol");
+    let report = RestoreService::verify_restored_database(&path).unwrap();
+    assert!(report.ok, "{:?}", report.checks);
+    assert_eq!(report.schema_version, 7);
+    assert!(Database::open(&path).unwrap().health().unwrap().ok);
+    assert_eq!(file_sha256(&manifest_path), manifest_hash);
+    assert_eq!(file_sha256(&payload_path), payload_hash);
+}
+
+#[test]
+fn backup_with_unexpected_schema_is_never_published_or_registered() {
+    let (directory, database) = temp_database();
+    Connection::open(database.path())
+        .unwrap()
+        .execute_batch("CREATE VIEW fixture_unexpected_view AS SELECT 1;")
+        .unwrap();
+    assert!(database.health().unwrap().ok);
+    let target = directory.path().join("incompatible-backups");
+    let service = BackupService::new(&database, directory.path());
+    let error = service
+        .create_manual(&target.to_string_lossy(), &AtomicBool::new(false))
+        .expect_err("backup should use the same schema gate as re-verification");
+    assert_eq!(error.code(), "BACKUP_INCOMPATIBLE");
+    assert!(service.list().unwrap().is_empty());
+    assert!(fs::read_dir(target).unwrap().next().is_none());
 }
 
 #[test]

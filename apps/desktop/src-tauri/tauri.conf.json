@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "XUSHU",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "dev.xushu.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm build && pnpm sidecar:prepare",
     "frontendDist": "../dist"
   },
   "app": {
@@ -32,13 +32,32 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "publisher": "XUSHU",
+    "copyright": "Copyright © 2026 XUSHU",
+    "category": "DeveloperTool",
+    "shortDescription": "本地优先的 AI 工作控制系统",
+    "longDescription": "序枢 XUSHU：定义目标与验收标准，独立运行真实验证，保存证据与决策，并恢复本地项目状态。",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "externalBin": ["binaries/xushu-hook"],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico"
+      }
+    }
   }
 }

@@ -220,6 +220,7 @@ function BackupSection({
   overview,
   onCreate,
   onPolicy,
+  onOpenExternal,
   onVerify,
   onRestore,
   onDelete,
@@ -228,6 +229,7 @@ function BackupSection({
   overview: DataProtectionOverview;
   onCreate: () => void;
   onPolicy: () => void;
+  onOpenExternal: () => void;
   onVerify: (record: BackupRecord) => void;
   onRestore: (record: BackupRecord) => void;
   onDelete: (record: BackupRecord) => void;
@@ -241,6 +243,10 @@ function BackupSection({
         meta="一致性快照 · SHA-256 · 未加密"
         actions={
           <>
+            <Button type="button" variant="outline" size="sm" onClick={onOpenExternal}>
+              <ArchiveRestore aria-hidden="true" />
+              打开外部备份
+            </Button>
             <Button type="button" variant="outline" size="sm" onClick={onPolicy}>
               <Clock3 aria-hidden="true" />
               备份策略
@@ -272,20 +278,15 @@ function BackupSection({
           </p>
         ) : null}
         <p>
-          备份总数 {overview.backups.length} 份 · 占用 {formatSize(overview.backupTotalSizeBytes)}
+          已登记 {overview.backups.length} 份 · 占用 {formatSize(overview.backupTotalSizeBytes)}
         </p>
       </div>
 
       {overview.backups.length === 0 ? (
         <EmptyState
           icon={DatabaseBackup}
-          title="尚未创建数据库备份"
-          description="创建一致性快照后，XUSHU 会校验清单、SHA-256、SQLite 完整性与关键业务关系。备份文件存在本身不等于可恢复。"
-          action={
-            <Button type="button" onClick={onCreate}>
-              创建第一份备份
-            </Button>
-          }
+          title="当前数据库没有备份登记"
+          description="恢复会将备份登记和策略回到快照时点。仍保存在磁盘上的备份，可以通过“打开外部备份”重新预检。"
         />
       ) : (
         <ul className="divide-y divide-line/60 border-b border-line/70">
@@ -359,8 +360,8 @@ export function DataProtectionPage() {
     });
   }
 
-  function requestRestore(record: BackupRecord) {
-    setRestoreDirectory(record.directoryPath);
+  function openRestore(directory: string) {
+    setRestoreDirectory(directory);
     setRestoreOpen(true);
   }
 
@@ -435,7 +436,7 @@ export function DataProtectionPage() {
             detail={
               lastBackup
                 ? `${formatSize(lastBackup.dataSizeBytes)} · ${shortId(lastBackup.backupId, 10)}`
-                : "请创建一致性备份并完成校验"
+                : "可创建备份或打开外部备份进行预检"
             }
             tone={lastBackup?.integrityStatus === "verified" ? "success" : "warning"}
           />
@@ -477,8 +478,9 @@ export function DataProtectionPage() {
         overview={overview}
         onCreate={() => setCreateOpen(true)}
         onPolicy={() => setPolicyOpen(true)}
+        onOpenExternal={() => openRestore("")}
         onVerify={requestVerify}
-        onRestore={requestRestore}
+        onRestore={(record) => openRestore(record.directoryPath)}
         onDelete={setDeleteTarget}
         verifyingId={verifyingId}
       />

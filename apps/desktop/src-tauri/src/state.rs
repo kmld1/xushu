@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -22,6 +23,7 @@ use xushu_core::{
 };
 
 use crate::error::ApiError;
+use crate::logging;
 
 /// 应用级状态。数据库初始化失败时仍允许窗口启动，并通过 IPC 返回可理解的
 /// `DATABASE_UNAVAILABLE` 错误，避免无提示闪退。
@@ -46,18 +48,32 @@ impl AppState {
     pub fn initialize(data_directory: &Path) -> Self {
         let exports_directory = data_directory.join("exports");
         let data_directory = Arc::new(data_directory.to_path_buf());
-        let hook_binary = resolve_hook_binary();
-        let claude_runtime = match ClaudeRuntimePaths::prepare(
-            &data_directory,
-            hook_binary,
-            env!("CARGO_PKG_VERSION"),
-        ) {
-            Ok(runtime) => Some(Arc::new(runtime)),
+        let data_lock = fs::create_dir_all(&*data_directory)
+            .map_err(CoreError::from)
+            .and_then(|()| lock_data_directory(&data_directory));
+        let claude_runtime = match &data_lock {
+            Ok(_) => {
+                if !cfg!(test) {
+                    logging::init(&data_directory);
+                }
+                let hook_binary = resolve_hook_binary();
+                match ClaudeRuntimePaths::prepare(
+                    &data_directory,
+                    hook_binary,
+                    env!("CARGO_PKG_VERSION"),
+                ) {
+                    Ok(runtime) => Some(Arc::new(runtime)),
+                    Err(error) => {
+                        logging::record_error(
+                            "claude_hook_runtime_initialization_failed",
+                            error.code(),
+                        );
+                        None
+                    }
+                }
+            }
             Err(error) => {
-                eprintln!(
-                    "[xushu] claude hook runtime initialization failed: code={}",
-                    error.code()
-                );
+                eprintln!("[xushu] application_data_lock_failed code={}", error.code());
                 None
             }
         };
@@ -70,9 +86,6 @@ impl AppState {
             None
         };
 
-        let data_lock = fs::create_dir_all(&*data_directory)
-            .map_err(CoreError::from)
-            .and_then(|()| lock_data_directory(&data_directory));
         let startup_restore_notice = match data_lock
             .as_ref()
             .ok()
@@ -81,10 +94,7 @@ impl AppState {
             None => None,
             Some(Ok(notice)) => notice,
             Some(Err(error)) => {
-                eprintln!(
-                    "[xushu] restore journal recovery failed: code={}",
-                    error.code()
-                );
+                logging::record_error("restore_journal_recovery_failed", error.code());
                 Some(RestoreStartupNotice::needs_manual(
                     data_directory
                         .join("restore-journal.json")
@@ -110,15 +120,28 @@ impl AppState {
 
         match result {
             Ok(database) => {
+                match database.migrate() {
+                    Ok(report) => logging::record(
+                        "INFO",
+                        &format!(
+                            "database_ready schema={} applied={}",
+                            report.current_version,
+                            report.applied.len()
+                        ),
+                    ),
+                    Err(error) => {
+                        logging::record_error("database_migration_failed", error.code());
+                    }
+                }
                 match VerificationService::new(&database).recover_interrupted() {
                     Ok(recovered) if recovered > 0 => {
-                        eprintln!("[xushu] recovered {recovered} interrupted verification run(s)");
+                        logging::record(
+                            "INFO",
+                            &format!("verification_runs_recovered count={recovered}"),
+                        );
                     }
                     Err(error) => {
-                        eprintln!(
-                            "[xushu] verification recovery failed: code={}",
-                            error.code()
-                        );
+                        logging::record_error("verification_recovery_failed", error.code());
                     }
                     _ => {}
                 }
@@ -127,24 +150,24 @@ impl AppState {
                         ClaudeIntegrationService::new(&database, runtime).import_pending_all();
                     let imported: usize = reports.iter().map(|report| report.imported).sum();
                     if imported > 0 {
-                        eprintln!("[xushu] imported {imported} pending Claude Code hook event(s)");
+                        logging::record(
+                            "INFO",
+                            &format!("claude_events_imported count={imported}"),
+                        );
                     }
                 }
                 match BackupService::new(&database, data_directory.as_path())
                     .run_due_automatic(&AtomicBool::new(false))
                 {
                     Ok(outcome) if outcome.status == "created" => {
-                        eprintln!("[xushu] automatic backup created");
+                        logging::record("INFO", "automatic_backup_created");
                     }
                     Ok(outcome) if outcome.status == "failed" => {
-                        eprintln!("[xushu] automatic backup failed; previous backups kept");
+                        logging::record("WARN", "automatic_backup_failed");
                     }
                     Ok(_) => {}
                     Err(error) => {
-                        eprintln!(
-                            "[xushu] automatic backup check failed: code={}",
-                            error.code()
-                        );
+                        logging::record_error("automatic_backup_check_failed", error.code());
                     }
                 }
                 Self {
@@ -164,10 +187,7 @@ impl AppState {
                 }
             }
             Err(error) => {
-                eprintln!(
-                    "[xushu] database initialization failed: code={}",
-                    error.code()
-                );
+                logging::record_error("database_initialization_failed", error.code());
                 Self {
                     database: Arc::new(Mutex::new(None)),
                     startup_error: Some(match pending_manual {
@@ -341,7 +361,7 @@ impl AppState {
             });
 
             if let Err(error) = result {
-                eprintln!("[xushu] verification finalize failed: code={}", error.code);
+                logging::record_error("verification_finalize_failed", &error.code);
             }
 
             if let Ok(mut controls) = state.controls.lock() {
@@ -630,7 +650,7 @@ impl AppState {
         if let Err(error) =
             RestoreService::switch_files(self.data_directory.as_path(), &journal, &plan)
         {
-            eprintln!("[xushu] restore switch failed: code={}", error.code());
+            logging::record_error("restore_switch_failed", error.code());
             return Ok(self.finish_failed_restore(db_guard, &journal, &plan, &operation_id, None));
         }
 
@@ -698,10 +718,7 @@ impl AppState {
                     })
                 }
                 Err(error) => {
-                    eprintln!(
-                        "[xushu] restored database could not be reopened: code={}",
-                        error.code()
-                    );
+                    logging::record_error("restored_database_reopen_failed", error.code());
                     Ok(self.finish_failed_restore(
                         db_guard,
                         &journal,
@@ -712,7 +729,7 @@ impl AppState {
                 }
             },
             Ok(report) => {
-                eprintln!("[xushu] restored database failed final validation");
+                logging::record("ERROR", "restored_database_final_validation_failed");
                 Ok(self.finish_failed_restore(
                     db_guard,
                     &journal,
@@ -722,10 +739,7 @@ impl AppState {
                 ))
             }
             Err(error) => {
-                eprintln!(
-                    "[xushu] restored database final check failed: code={}",
-                    error.code()
-                );
+                logging::record_error("restored_database_final_check_failed", error.code());
                 Ok(self.finish_failed_restore(db_guard, &journal, &plan, &operation_id, None))
             }
         }
@@ -839,11 +853,10 @@ fn now_iso() -> String {
 }
 
 fn resolve_hook_binary() -> Option<PathBuf> {
+    #[cfg(debug_assertions)]
     if let Some(configured) = std::env::var_os("XUSHU_HOOK_BIN") {
         let path = PathBuf::from(configured);
-        if path.is_file() {
-            return Some(path);
-        }
+        return verify_hook_binary(&path).then_some(path);
     }
 
     let executable = std::env::current_exe().ok()?;
@@ -853,10 +866,64 @@ fn resolve_hook_binary() -> Option<PathBuf> {
     } else {
         &["xushu-hook"]
     };
-    names
+    let mut candidates = names
         .iter()
         .map(|name| directory.join(name))
-        .find(|path| path.is_file())
+        .filter(|path| path.is_file())
+        .peekable();
+    if candidates.peek().is_none() {
+        logging::record_error("sidecar_probe_failed", "missing");
+    }
+    candidates.find(|path| verify_hook_binary(path))
+}
+
+/// 生产安装包必须能区分“sidecar 缺失、损坏、版本不一致”和可用接收器。
+/// 只执行固定的 `--version` 参数，不经过 shell，也不接受用户输入。
+fn verify_hook_binary(path: &Path) -> bool {
+    if !path.is_file() {
+        logging::record_error("sidecar_probe_failed", "missing");
+        return false;
+    }
+
+    let mut command = Command::new(path);
+    command
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(_) => {
+            logging::record_error("sidecar_probe_failed", "spawn_failed");
+            return false;
+        }
+    };
+    if !output.status.success() {
+        logging::record_error("sidecar_probe_failed", "nonzero_exit");
+        return false;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if hook_version_matches(&stdout, env!("CARGO_PKG_VERSION")) {
+        true
+    } else {
+        logging::record_error("sidecar_probe_failed", "version_mismatch");
+        false
+    }
+}
+
+fn hook_version_matches(output: &str, expected: &str) -> bool {
+    output
+        .trim()
+        .strip_prefix("xushu-hook ")
+        .is_some_and(|version| version == expected)
 }
 
 #[cfg(test)]
@@ -1230,6 +1297,21 @@ mod tests {
         }
         assert_eq!(state.get_backup_policy().unwrap().retention_count, 9);
         assert!(!directory.path().join("restore-journal.json").exists());
+    }
+
+    #[test]
+    fn sidecar_version_probe_accepts_only_the_exact_packaged_version() {
+        assert!(hook_version_matches("xushu-hook 0.1.0\n", "0.1.0"));
+        assert!(hook_version_matches("  xushu-hook 0.1.0  \r\n", "0.1.0"));
+        assert!(!hook_version_matches("xushu-hook 0.0.9\n", "0.1.0"));
+        assert!(!hook_version_matches("xushu-hook 0.1.0\n", "0.1.1"));
+        assert!(!hook_version_matches("xushu-hook\n", "0.1.0"));
+        assert!(!hook_version_matches("garbage", "0.1.0"));
+        assert!(!hook_version_matches("", "0.1.0"));
+        assert!(!hook_version_matches(
+            "xushu-hook 0.1.0\nextra output",
+            "0.1.0"
+        ));
     }
 
     #[test]

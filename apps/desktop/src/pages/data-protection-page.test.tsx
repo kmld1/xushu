@@ -361,6 +361,29 @@ describe("data protection page", () => {
     expect(await within(dialog).findByText("备份已创建")).toBeInTheDocument();
   });
 
+  it("opens an unregistered backup for preflight with an empty registry", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getDataProtectionOverview).mockResolvedValue({
+      ...overview,
+      backups: [],
+      lastBackup: null,
+      lastVerifiedBackup: null,
+      backupTotalSizeBytes: 0,
+    });
+    renderPage();
+
+    expect(await screen.findByText("当前数据库没有备份登记")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "打开外部备份" }));
+    const directory = await screen.findByLabelText("备份目录");
+    expect(directory).toHaveValue("");
+    await user.type(directory, backup.directoryPath);
+    await user.click(screen.getByRole("button", { name: "开始预检" }));
+
+    await waitFor(() => expect(api.preflightRestore).toHaveBeenCalledWith(backup.directoryPath));
+    expect(api.performRestore).not.toHaveBeenCalled();
+    expect(api.createBackup).not.toHaveBeenCalled();
+  });
+
   it("verifies a backup and shows the integrity checks", async () => {
     const user = userEvent.setup();
     renderPage();

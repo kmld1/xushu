@@ -17,8 +17,9 @@ use super::integrity::{
     DataIntegrityReport, DataIntegrityService, IntegrityCheck, IntegrityStatus,
 };
 use super::manifest::{
-    build_manifest, manifest_bytes, open_isolated_payload, read_manifest, read_staged_manifest,
-    verify_payload, BackupOrigin, MANIFEST_FILE_NAME, MAX_BACKUP_BYTES, PAYLOAD_FILE_NAME,
+    build_manifest, isolated_failure_detail, manifest_bytes, open_isolated_payload, read_manifest,
+    read_staged_manifest, verify_payload, BackupOrigin, MANIFEST_FILE_NAME, MAX_BACKUP_BYTES,
+    PAYLOAD_FILE_NAME,
 };
 use super::paths::{
     capacity_ok, copy_regular_file_bounded, display_path, free_space_bytes, prepare_directory,
@@ -358,11 +359,13 @@ impl<'a> BackupService<'a> {
             checks.push(failed_check(
                 "isolated_copy",
                 "隔离副本",
-                "无法创建或校验隔离副本",
+                &format!(
+                    "无法创建或校验隔离副本：{}",
+                    isolated_failure_detail(&error)
+                ),
             ));
             verified = false;
             message = "隔离校验失败".to_owned();
-            let _ = error;
         } else {
             match open_isolated_payload(&copy_path, manifest.schema_version) {
                 Ok(snapshot) => {
@@ -391,14 +394,19 @@ impl<'a> BackupService<'a> {
                         (compaction, report) => {
                             verified = false;
                             message = "隔离恢复检查失败".to_owned();
+                            let (stage, error) = if let Err(error) = &compaction {
+                                ("整理隔离副本为单文件失败", Some(error))
+                            } else {
+                                ("执行隔离副本数据关系检查失败", report.as_ref().err())
+                            };
+                            let detail = error.map_or_else(
+                                || stage.to_owned(),
+                                |error| format!("{stage}：{}", isolated_failure_detail(error)),
+                            );
                             checks.push(failed_check(
                                 "sqlite_integrity",
                                 "SQLite 与业务关系",
-                                if compaction.is_err() {
-                                    "隔离副本无法整理为单文件"
-                                } else {
-                                    "隔离副本数据关系检查失败"
-                                },
+                                &detail,
                             ));
                             if let Ok(report) = report {
                                 integrity = Some(report);
@@ -408,13 +416,12 @@ impl<'a> BackupService<'a> {
                 }
                 Err(error) => {
                     verified = false;
-                    message = "隔离恢复无法打开备份数据库".to_owned();
+                    message = "隔离备份数据库校验失败".to_owned();
                     checks.push(failed_check(
                         "sqlite_integrity",
                         "SQLite 与业务关系",
-                        "备份数据库无法通过迁移或基本完整性检查",
+                        &isolated_failure_detail(&error),
                     ));
-                    let _ = error;
                 }
             }
         }
@@ -762,8 +769,9 @@ impl<'a> BackupService<'a> {
                 return Err(CoreError::BackupCancelled);
             }
 
+            let schema_version = self.current_schema_version()?;
             {
-                let snapshot = Database::open(&payload_path)?;
+                let snapshot = open_isolated_payload(&payload_path, schema_version)?;
                 snapshot.compact_for_backup()?;
                 let report = DataIntegrityService::new(&snapshot).check()?;
                 if !report.ok {
@@ -782,7 +790,6 @@ impl<'a> BackupService<'a> {
                 return Err(CoreError::BackupCancelled);
             }
 
-            let schema_version = self.current_schema_version()?;
             let manifest = build_manifest(
                 &backup_id,
                 env!("CARGO_PKG_VERSION"),

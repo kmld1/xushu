@@ -5,9 +5,11 @@
 //! 打开隔离副本执行 SQLite 完整性与业务关系检查。
 
 use std::path::Path;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use chrono::DateTime;
+use regex::{Captures, Regex};
 use rusqlite::{config::DbConfig, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -246,7 +248,17 @@ pub(super) fn open_isolated_payload(
     path: &Path,
     schema_version: i64,
 ) -> Result<Database, CoreError> {
-    let mut source = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    let mut source = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
+        .map_err(|error| isolated_payload_error("打开隔离副本", error.into()))?;
+    validate_isolated_schema(&mut source, schema_version)
+        .map_err(|error| isolated_payload_error("核对隔离副本 Schema", error))?;
+    Database::configure(&source)
+        .map_err(|error| isolated_payload_error("初始化隔离 SQLite 日志模式", error))?;
+    Database::from_configured_connection(path, source)
+        .map_err(|error| isolated_payload_error("执行隔离 SQLite 迁移", error))
+}
+
+fn validate_isolated_schema(source: &mut Connection, schema_version: i64) -> Result<(), CoreError> {
     source.set_db_config(DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, false)?;
     source.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
     let deadline = Instant::now() + ISOLATED_SQLITE_TIMEOUT;
@@ -308,7 +320,39 @@ pub(super) fn open_isolated_payload(
             ));
         }
     }
-    Database::from_connection(path, source)
+    Ok(())
+}
+
+fn isolated_payload_error(stage: &str, error: CoreError) -> CoreError {
+    let detail = format!("{stage}：{}", isolated_failure_detail(&error));
+    CoreError::IsolatedPayload {
+        detail,
+        source: Box::new(error),
+    }
+}
+
+// The backup UI receives fixed messages and numeric codes, never SQLite's raw error text.
+pub(super) fn isolated_failure_detail(error: &CoreError) -> String {
+    match error {
+        CoreError::Compatibility(message)
+        | CoreError::Backup(message)
+        | CoreError::Restore(message)
+        | CoreError::IsolatedPayload {
+            detail: message, ..
+        } => message.clone(),
+        CoreError::Database(rusqlite::Error::SqliteFailure(failure, _)) => {
+            format!(
+                "SQLite {:?}（扩展码 {}）",
+                failure.code, failure.extended_code
+            )
+        }
+        CoreError::Io(error) => format!(
+            "文件系统 {:?}（系统码 {:?}）",
+            error.kind(),
+            error.raw_os_error()
+        ),
+        error => error.code().to_owned(),
+    }
 }
 
 const SCHEMA_SQL: &str = "SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY type, name";
@@ -316,7 +360,36 @@ const SCHEMA_SQL: &str = "SELECT type, name, tbl_name, sql FROM sqlite_schema OR
 fn read_schema_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<(String, String, String, Option<String>)> {
-    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+    let sql: Option<String> = row.get(3)?;
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        sql.map(normalize_schema_line_endings),
+    ))
+}
+
+fn normalize_schema_line_endings(sql: String) -> String {
+    if !sql.contains("\r\n") {
+        return sql;
+    }
+    // SQLite preserves source formatting in sqlite_schema. Treat CRLF and LF as
+    // equivalent outside quoted tokens, without changing literals or identifiers.
+    static TOKENS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r#"(?s)'(?:[^']|'')*'|"(?:[^"]|"")*"|`(?:[^`]|``)*`|\[[^\]]*\]|(?P<layout>--[^\n]*(?:\n|\z)|/\*.*?\*/|\r\n)"# ,
+        )
+        .expect("valid SQLite schema token pattern")
+    });
+    TOKENS
+        .replace_all(&sql, |tokens: &Captures<'_>| {
+            if let Some(layout) = tokens.name("layout") {
+                layout.as_str().replace("\r\n", "\n")
+            } else {
+                tokens[0].to_owned()
+            }
+        })
+        .into_owned()
 }
 
 #[cfg(test)]
@@ -324,6 +397,29 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn isolated_payload_error_keeps_sqlite_source_out_of_public_message() {
+        let detail = "SQLite raw diagnostic with private path";
+        let sqlite_error = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_NOTADB),
+            Some(detail.to_owned()),
+        );
+        let error = isolated_payload_error("核对隔离副本 Schema", sqlite_error.into());
+        assert!(error.to_string().contains("NotADatabase"));
+        assert!(!error.to_string().contains(detail));
+        assert!(std::error::Error::source(&error)
+            .unwrap()
+            .to_string()
+            .contains(detail));
+    }
+
+    #[test]
+    fn schema_line_endings_keep_multiline_quoted_tokens_exact() {
+        let sql = "CREATE TABLE [quoted\r\nname] (\r\n\"other\r\nname\" TEXT DEFAULT 'value''s\r\nline',\r\n`back``tick\r\nname` INT /* comment ' \r\n remains */\r\n); -- '['\r\n";
+        let expected = "CREATE TABLE [quoted\r\nname] (\n\"other\r\nname\" TEXT DEFAULT 'value''s\r\nline',\n`back``tick\r\nname` INT /* comment ' \n remains */\n); -- '['\n";
+        assert_eq!(normalize_schema_line_endings(sql.to_owned()), expected);
+    }
 
     fn valid_manifest() -> BackupManifest {
         build_manifest(

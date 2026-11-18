@@ -199,7 +199,7 @@ Phase 4.1 的执行结果见独立报告。以下步骤仅用于明确授权的�
 
 ## 9. 已知限制
 
-- **发布包 sidecar 尚未完成**：当前开发构建要求 `xushu-hook.exe` 与桌面程序位于同一目录（`target/debug` 或 `target/release`），或通过 `XUSHU_HOOK_BIN` 指向；Phase 7 需把 CLI 作为 sidecar 打包并验证升级/路径变化。
+- **生产 sidecar（Phase 7A 起）**：正式构建通过 Tauri `externalBin` 把 `xushu-hook.exe` 安装到主程序同目录；开发构建仍要求它在 `target/debug`/`target/release` 同目录，或通过 `XUSHU_HOOK_BIN` 指向。主程序启动时执行固定的 `xushu-hook --version` 探测；缺失、损坏或版本不一致时 Claude 接入显示“接收程序不可用”。升级后 sidecar 路径/摘要变化会显示需要重新安装 Hooks。卸载应用不会移除项目中的既有 Hooks 配置，需先在应用内逐项目卸载，或人工清理带 `--xushu-managed` 的条目。
 - **兼容范围**：已实测 Windows 11 与 Claude Code 2.1.319。其他版本与平台尚待验证。
 - **项目归档不自动停用**：归档项目仍保留已安装 Hooks，需用户手动停用/卸载。
 - **会话结束缺失**：Hook 是尽力观察；UI 只能显示“结束未确认”。

@@ -10,6 +10,10 @@ XUSHU 不替代 Claude Code、编辑器或终端，也不把 AI 的“已完成�
 
 ## 当前状态
 
+**Phase 7（Windows x64 0.1.1 正式候选）**。宿主构建与安装包载荷核验通过，状态为 `RELEASE_PREPARATION_COMPLETE`。Phase 7A.4 仍为 `VALIDATION_PENDING`，四项来宾及原始现场验收为 `DEFERRED_BY_USER`。
+
+**历史 Phase 7A（Windows 正式产品化、安装与生命周期）：Windows x64 Release、NSIS 安装包、`xushu-hook` sidecar、有界日志与隔离安装版 E2E PASS；生产 identifier 实机安装、代码签名、真实 Claude Code 会话与人工视觉 PENDING/NOT_RUN（2026-11-14）。** [Phase 7A 报告](docs/phases/PHASE_7A_REPORT.md) · [ADR-0010](docs/architecture/ADR/0010-windows-release-packaging.md)
+
 **Phase 6（安全、隐私保护、数据备份与灾难恢复）：代码、迁移、受限 IPC、前端、自动化与隔离 Windows Tauri/WebView2 E2E PASS；人工视觉、真实故障注入与生产化验收 PENDING（2026-11-13）。** [Phase 6 报告](docs/phases/PHASE_6_REPORT.md) · [ADR-0009](docs/architecture/ADR/0009-backup-restore-data-protection.md) · [数据保护规范](docs/architecture/DATA_PROTECTION.md)
 
 **Phase 5（长期记忆、开发决策与跨会话恢复）：代码、迁移、自动化与隔离桌面 E2E PASS；人工视觉与产品化验收 PENDING（2026-11-12）。** [Phase 5 报告](docs/phases/PHASE_5_REPORT.md) · [ADR-0008](docs/architecture/ADR/0008-project-memory-decisions-recovery.md)
@@ -77,7 +81,7 @@ XUSHU 不替代 Claude Code、编辑器或终端，也不把 AI 的“已完成�
 - 路径安全：拒绝 UNC、相对路径、Junction、符号链接与重解析点祖先；文件打开不跟随链接；大小/容量上限；
 - 恢复不包含 Hook Spool、Salt、项目 `.claude` 配置、导出报告或 WebView 偏好；不会自动安装/停用 Hooks，不改变任务完成门禁。
 
-**Phase 6 待验收项**：数据保护页/创建备份/策略 Dialog/校验 Sheet/7 步恢复向导的人工视觉与键盘焦点；真实故障注入（切换中杀进程、磁盘满、权限拒绝、回退失败）；生产安装包与 sidecar；macOS/Linux；真实 Claude Code 恢复后复核。备份未加密，审计时不得把未校验备份或回退显示为成功恢复。
+**Phase 6 待验收项**：数据保护页/创建备份/策略 Dialog/校验 Sheet/7 步恢复向导的人工视觉与键盘焦点；真实故障注入（切换中杀进程、磁盘满、权限拒绝、回退失败）；生产 identifier 实机安装与签名；macOS/Linux；真实 Claude Code 恢复后复核。备份未加密，审计时不得把未校验备份或回退显示为成功恢复。
 
 **Phase 5 待验收项**：知识页/恢复页的浅色与深色人工视觉、500×480/1366×768/1600×900 实际截图、长文本与窄窗交互、键盘焦点；生产安装包与跨平台验证仍待后续阶段。
 
@@ -141,7 +145,37 @@ pnpm tauri dev
 首次编译需要下载并构建 Tauri/rusqlite 依赖，耗时较长。`pnpm build` 当前会产生约
 979 KB（gzip 280 KB）的单 chunk 及 >500 KB 提示；这是已知优化项，不影响功能。
 
-`xushu-hook.exe` 在开发模式下由 `cargo build -p xushu-hook` 生成；桌面程序从当前可执行文件同目录查找它。生产安装包的 sidecar 打包尚未完成（Phase 7），因此当前不要把开发版接入用于最终分发。
+`xushu-hook.exe` 在开发模式下由 `cargo build -p xushu-hook` 生成；桌面程序从当前可执行文件同目录查找它。正式构建会由 `pnpm sidecar:prepare` 自动编译并按 Tauri `externalBin` 规则打包，安装后位于主程序同目录。
+
+## Windows 正式构建与安装（0.1.1 候选）
+
+```bash
+pnpm install --frozen-lockfile
+pnpm release:windows
+```
+
+使用默认 Cargo 输出目录时，产物路径如下。
+
+```text
+target/release/xushu-desktop.exe
+target/release/bundle/nsis/XUSHU_0.1.1_x64-setup.exe
+```
+
+- 安装器使用 Tauri 官方 NSIS，默认 **currentUser** 安装（无需管理员权限），默认目录 `%LOCALAPPDATA%\XUSHU`。
+- 安装包包含主程序与 `xushu-hook.exe`；应用启动时会执行固定的 `xushu-hook --version` 探测，sidecar 缺失、损坏或版本与主程序不一致时，Claude 接入状态显示“接收程序不可用”，不会静默使用不可信接收器。
+- 用户数据保存在 `%APPDATA%\dev.xushu.desktop`（SQLite、Hook Spool、Salt、导出、备份工作区等），与安装目录分离。日志位于 `%APPDATA%\dev.xushu.desktop\logs\xushu.log`，有界轮转且只记录固定事件与错误码。
+- 升级安装保留用户数据与数据库迁移；升级后 sidecar 摘要或路径变化会显示需要重新安装 Hooks，不会自动修改项目配置。
+- 卸载默认保留用户数据库、备份、日志与项目目录。卸载向导中的“删除应用数据”复选框默认不勾选；静默卸载不会删除 `%APPDATA%` 数据。
+- 卸载不会删除各项目 `.claude/settings.local.json` 中的 XUSHU Hooks。请在卸载前先在应用内逐项目“卸载 Hooks”；若应用已卸载，需人工从项目设置中删除带 `--xushu-managed` 的条目（先备份该文件）。
+- 当前未配置 Windows 代码签名证书（`SIGNING_NOT_CONFIGURED`），安装包不是已签名发行版；未启用自动更新。
+
+历史 Phase 7A 的隔离安装 E2E 可用以下命令运行。
+
+```bash
+python scripts/phase7a-e2e.py --installer "<0.1.0 隔离 NSIS 安装包>"
+```
+
+该脚本只接受使用 `dev.xushu.e2e.phase7a` identifier 与隔离 `appDirectoriesOverride` 构建的测试安装包，使用独立数据目录，不打开或写入正常用户数据库。 `--installer` 使用 `0.1.0` 基线包，可选的 `--upgrade-installer` 使用 `0.1.1` 隔离升级包。
 
 ## 使用流程
 

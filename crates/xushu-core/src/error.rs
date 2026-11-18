@@ -51,6 +51,13 @@ pub enum CoreError {
     #[error("备份错误: {0}")]
     Backup(String),
 
+    #[error("{detail}")]
+    IsolatedPayload {
+        detail: String,
+        #[source]
+        source: Box<CoreError>,
+    },
+
     #[error("备份已取消")]
     BackupCancelled,
 
@@ -92,6 +99,10 @@ impl CoreError {
             Self::Claude(_) => "CLAUDE_INTEGRATION_ERROR",
             Self::Recovery(_) => "RECOVERY_ERROR",
             Self::Backup(_) => "BACKUP_ERROR",
+            Self::IsolatedPayload { source, .. } if matches!(**source, Self::Compatibility(_)) => {
+                "BACKUP_INCOMPATIBLE"
+            }
+            Self::IsolatedPayload { .. } => "BACKUP_ERROR",
             Self::BackupCancelled => "BACKUP_CANCELLED",
             Self::Restore(_) => "RESTORE_ERROR",
             Self::RestoreConfirmationRequired => "RESTORE_CONFIRMATION_REQUIRED",
