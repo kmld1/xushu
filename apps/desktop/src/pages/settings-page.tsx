@@ -23,7 +23,7 @@ const themeOptions: Array<{
 }> = [
   { mode: "light", label: "浅色", description: "始终使用浅色界面", icon: Sun },
   { mode: "dark", label: "深色", description: "始终使用深色界面", icon: Moon },
-  { mode: "system", label: "跟随系统", description: "跟随 Windows 主题切换", icon: Monitor },
+  { mode: "system", label: "跟随系统", description: "随系统外观切换", icon: Monitor },
 ];
 
 function DefinitionRow({ label, value }: { label: string; value: string }) {
@@ -56,7 +56,6 @@ function AboutSection() {
           <DefinitionRow label="产品" value={appInfo.data.name} />
           <DefinitionRow label="应用版本" value={appInfo.data.version} />
           <DefinitionRow label="Tauri" value={appInfo.data.tauriVersion} />
-          <DefinitionRow label="阶段" value={appInfo.data.phase} />
           <DefinitionRow label="平台" value={appInfo.data.platform} />
         </dl>
       )}
@@ -73,7 +72,7 @@ function DataPrivacySection() {
       <dl className="border-t border-line/70">
         <DefinitionRow label="数据库" value={health.data?.databaseFile ?? "读取中…"} />
         <DefinitionRow label="Schema" value={health.data ? `v${health.data.schemaVersion}` : "—"} />
-        <DefinitionRow label="存储位置" value="Windows 应用数据目录" />
+        <DefinitionRow label="存储位置" value="本机应用数据目录" />
         <DefinitionRow label="网络" value="无云同步" />
         <DefinitionRow label="前端权限" value="固定 Tauri Commands" />
       </dl>

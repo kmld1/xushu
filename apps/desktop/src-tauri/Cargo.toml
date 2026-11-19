@@ -18,6 +18,10 @@ tauri = { version = "=2.12.5", features = [] }
 uuid = "=1.29.0"
 xushu-core = { path = "../../../crates/xushu-core" }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["NSScreen", "NSWindow"] }
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["NSString", "NSUserDefaults"] }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = [
     "Win32_Foundation",

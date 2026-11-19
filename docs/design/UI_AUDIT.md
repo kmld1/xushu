@@ -1,5 +1,9 @@
 # XUSHU UI Audit
 
+## v1.0.0 macOS 窗口收口
+
+macOS 将系统交通灯、品牌、项目、页面和主题放入同一条 44px 工作带。左上角预留系统控件空间，空白区域支持拖动与按系统偏好双击，沿用暖白与墨绿令牌、240px 侧栏及 52px 窄窗图标轨。正式版本信息位于侧栏和设置页。Windows 的 44px 拖动工作带、右侧窗口按钮及 Snap 覆盖层沿用既有实现。前端增加 macOS 与 Windows 条件渲染测试，Rust 配置测试核对 macOS 覆盖后的完整窗口属性。
+
 > **VISUAL_REVIEW_PENDING**。Phase 6 已完成数据保护页的程序化、隔离桌面 E2E 与布局/主题测量；人工视觉仍未签收。当前待验收清单见 [Phase 6 报告第 22 节](../phases/PHASE_6_REPORT.md#22-人工验收清单)。Phase 4/5 的历史 PENDING 未被本轮改为 PASS。
 > 关联规范：`docs/design/DESIGN_SYSTEM.md`（v2.4 / Phase 6）
 > 关联报告：`docs/design/UI_REDESIGN_PHASE_3_6.md`

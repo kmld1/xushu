@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
@@ -35,7 +35,7 @@ const invokeMock = invoke as unknown as InvokeMock;
 
 const appInfo = {
   name: "序枢 XUSHU",
-  version: "0.1.0",
+  version: "1.0.0",
   tauriVersion: "2.12.5",
   phase: "Phase 6",
   platform: "windows",
@@ -530,6 +530,7 @@ const populatedSummary: WorkspaceSummary = {
 };
 
 function mockBackend({
+  platform = "windows",
   withProject = false,
   failHealth = false,
   tasks = [task],
@@ -537,6 +538,7 @@ function mockBackend({
   recoveryState = "fresh",
   readRecoveryOverview = () => makeRecoveryOverview(recoveryState),
 }: {
+  platform?: "macos" | "windows";
   withProject?: boolean;
   failHealth?: boolean;
   tasks?: Task[];
@@ -547,7 +549,7 @@ function mockBackend({
   invokeMock.mockImplementation(async (command, args) => {
     switch (command) {
       case "get_app_info":
-        return appInfo;
+        return { ...appInfo, platform };
       case "get_database_health":
         if (failHealth) {
           throw { code: "DATABASE_UNAVAILABLE", message: "本地数据库尚未就绪" };
@@ -761,6 +763,38 @@ describe("XUSHU desktop shell", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
+
+  it.each(["macos", "windows"] as const)(
+    "renders the matching title bar on %s",
+    async (platform) => {
+      mockBackend({ platform });
+      render(<App />);
+
+      expect(await screen.findByText("v1.0.0")).toBeInTheDocument();
+      const header = screen.getByRole("banner");
+      const controls = within(header).queryByRole("group", { name: "窗口控制" });
+      const theme = within(header).getByRole("group", { name: "主题设置" });
+      if (platform === "macos") {
+        expect(controls).not.toBeInTheDocument();
+        expect(header).not.toHaveAttribute("data-tauri-drag-region");
+
+        const light = within(theme).getByRole("button", { name: "浅色" });
+        fireEvent.mouseDown(light, { button: 0, detail: 1 });
+        fireEvent.doubleClick(light, { button: 0, detail: 2 });
+        expect(invokeMock).not.toHaveBeenCalledWith("plugin:window|start_dragging");
+        expect(invokeMock).not.toHaveBeenCalledWith("macos_titlebar_double_click");
+
+        fireEvent.mouseDown(header, { button: 0, detail: 1 });
+        fireEvent.doubleClick(header, { button: 0, detail: 2 });
+        expect(invokeMock).toHaveBeenCalledWith("plugin:window|start_dragging");
+        expect(invokeMock).toHaveBeenCalledWith("macos_titlebar_double_click");
+      } else {
+        expect(controls).toBeInTheDocument();
+        expect(header).toHaveAttribute("data-tauri-drag-region", "deep");
+      }
+      expect(screen.queryByText("Phase 6 · 数据保护")).not.toBeInTheDocument();
+    },
+  );
 
   it("renders an honest empty workspace and real health data", async () => {
     const user = userEvent.setup();

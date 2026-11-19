@@ -54,7 +54,7 @@ export function AppLayout() {
         跳到主要内容
       </a>
 
-      <WorkspaceChrome />
+      <WorkspaceChrome platform={appInfo.data?.platform} />
 
       <div className="flex min-h-0 flex-1">
         <aside
@@ -134,7 +134,6 @@ export function AppLayout() {
                 {appInfo.isPending ? "…" : appInfo.data ? `v${appInfo.data.version}` : "—"}
               </span>
             </div>
-            <p className="mt-0.5 text-[10px] text-muted-foreground/80">Phase 6 · 数据保护</p>
           </div>
         </aside>
 

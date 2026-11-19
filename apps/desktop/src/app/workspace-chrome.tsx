@@ -1,4 +1,6 @@
+import { invoke } from "@tauri-apps/api/core";
 import { ExternalLink, FolderGit2 } from "lucide-react";
+import type { MouseEvent } from "react";
 import { Link, useLocation } from "react-router";
 
 import { ThemeControl } from "@/components/theme-control";
@@ -14,9 +16,31 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { WindowControls } from "@/components/window-controls";
 import { ProjectGitSummary } from "@/features/projects/project-git-summary";
 import { useCurrentProject } from "@/features/workspace/use-current-project";
+import { cn } from "@/lib/utils";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
 const SIDEBAR_WIDTH = "w-[240px] max-[759px]:w-[52px]";
+
+function isTitleBarBackground(event: MouseEvent<HTMLElement>) {
+  return (
+    event.button === 0 &&
+    event.target instanceof Element &&
+    event.currentTarget.contains(event.target) &&
+    !event.target.closest("a, button, input, select, textarea, [contenteditable], [tabindex]")
+  );
+}
+
+function startMacTitleBarDrag(event: MouseEvent<HTMLElement>) {
+  if (event.detail === 1 && isTitleBarBackground(event)) {
+    void invoke("plugin:window|start_dragging").catch(() => undefined);
+  }
+}
+
+function doubleClickMacTitleBar(event: MouseEvent<HTMLElement>) {
+  if (isTitleBarBackground(event)) {
+    void invoke("macos_titlebar_double_click").catch(() => undefined);
+  }
+}
 
 function pageTitle(pathname: string) {
   if (pathname === "/") {
@@ -113,16 +137,32 @@ function ProjectContext() {
   );
 }
 
-export function WorkspaceChrome() {
+export function WorkspaceChrome({ platform }: { platform: string | undefined }) {
   const { pathname } = useLocation();
   const title = pageTitle(pathname);
+  const isMac = platform === "macos";
+  const usesCustomTitleBar = platform !== undefined && !isMac;
 
   return (
-    <header data-tauri-drag-region="deep" className="flex h-11 shrink-0 select-none bg-workspace">
+    <header
+      data-tauri-drag-region={usesCustomTitleBar ? "deep" : undefined}
+      onMouseDown={isMac ? startMacTitleBarDrag : undefined}
+      onDoubleClick={isMac ? doubleClickMacTitleBar : undefined}
+      className={cn(
+        "flex h-11 shrink-0 select-none bg-workspace",
+        isMac && "border-b border-line/60",
+      )}
+    >
+      {isMac && <div aria-hidden="true" className="w-[92px] shrink-0" />}
       <Link
         to="/"
         aria-label="序枢 XUSHU 工作台"
-        className={`${SIDEBAR_WIDTH} flex shrink-0 items-center gap-2.5 border-r border-line bg-sidebar px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring max-[759px]:justify-center max-[759px]:px-0`}
+        className={cn(
+          "flex shrink-0 items-center gap-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          isMac
+            ? "w-[148px] pr-3.5 max-[759px]:w-[34px] max-[759px]:pr-1"
+            : `${SIDEBAR_WIDTH} border-r border-line bg-sidebar px-3.5 max-[759px]:justify-center max-[759px]:px-0`,
+        )}
       >
         <span
           className="grid size-7 shrink-0 place-items-center rounded-[5px] bg-primary text-[13px] font-semibold text-primary-foreground"
@@ -135,14 +175,19 @@ export function WorkspaceChrome() {
         </span>
       </Link>
 
-      <div className="flex min-w-0 flex-1 items-center gap-3 border-b border-line/60 pl-3.5 pr-0 max-[759px]:gap-2 max-[759px]:pl-2.5">
+      <div
+        className={cn(
+          "flex min-w-0 flex-1 items-center gap-3 pl-3.5 max-[759px]:gap-2 max-[759px]:pl-2.5",
+          isMac ? "pr-3" : "border-b border-line/60",
+        )}
+      >
         <ProjectContext />
         <span className="h-3.5 w-px shrink-0 bg-line" aria-hidden="true" />
         <p className="shrink-0 text-sm font-semibold tracking-[-0.01em]">{title}</p>
         <div className="ml-auto flex shrink-0 items-center">
           <ThemeControl />
         </div>
-        <WindowControls />
+        {usesCustomTitleBar && <WindowControls />}
       </div>
     </header>
   );

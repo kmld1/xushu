@@ -1,4 +1,24 @@
 {
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "序枢 XUSHU",
+        "width": 1100,
+        "height": 720,
+        "minWidth": 500,
+        "minHeight": 480,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 14, "y": 15 },
+        "shadow": true,
+        "center": true
+      }
+    ]
+  },
   "bundle": {
     "targets": ["dmg"],
     "macOS": {

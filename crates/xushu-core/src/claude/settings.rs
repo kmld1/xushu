@@ -477,6 +477,15 @@ pub(crate) struct MutationLock {
     _directory: Directories,
 }
 
+#[cfg(unix)]
+impl Drop for MutationLock {
+    fn drop(&mut self) {
+        // A concurrent spawn can briefly inherit the open file description.
+        // Release the flock at the end of this operation, even before that FD closes.
+        let _ = self._file.unlock();
+    }
+}
+
 pub(crate) fn lock_mutation(
     backup_dir: &Path,
     project_id: &str,
@@ -709,6 +718,22 @@ fn to_hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[cfg(unix)]
+    #[test]
+    fn mutation_lock_releases_even_if_a_spawned_process_retains_a_descriptor() {
+        let fixture = tempfile::TempDir::new().unwrap();
+        let guard = lock_mutation(fixture.path(), "project").unwrap();
+        let inherited_fd = guard._file.try_clone().unwrap();
+        assert!(matches!(
+            lock_mutation(fixture.path(), "project"),
+            Err(CoreError::Conflict(_))
+        ));
+        drop(guard);
+        let next = lock_mutation(fixture.path(), "project");
+        drop(inherited_fd);
+        assert!(next.is_ok());
+    }
 
     #[test]
     fn rollback_preserves_settings_changed_after_our_write() {

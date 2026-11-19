@@ -122,6 +122,8 @@ pub fn run() {
             data_protection_commands::check_data_integrity,
             data_protection_commands::preflight_restore,
             data_protection_commands::perform_restore,
+            #[cfg(target_os = "macos")]
+            window_chrome::macos_titlebar_double_click,
         ])
         .build(tauri::generate_context!())
         .expect("运行序枢 XUSHU 桌面程序失败");

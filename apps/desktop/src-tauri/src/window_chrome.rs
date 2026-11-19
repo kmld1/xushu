@@ -324,3 +324,85 @@ const BUTTON_WIDTH: u32 = 46;
 pub fn install(_window: &tauri::WebviewWindow) -> tauri::Result<()> {
     Ok(())
 }
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub fn macos_titlebar_double_click(window: tauri::WebviewWindow) -> Result<(), String> {
+    use objc2_app_kit::{NSWindow, NSWindowStyleMask};
+    use objc2_foundation::{ns_string, NSRect, NSUserDefaults};
+    use std::sync::Mutex;
+
+    static FRAME_BEFORE_FILL: Mutex<Option<NSRect>> = Mutex::new(None);
+
+    if window.label() != "main" {
+        return Err("窗口操作仅适用于主窗口".to_owned());
+    }
+    let target = window.clone();
+    window
+        .run_on_main_thread(move || {
+            let Ok(handle) = target.ns_window() else {
+                return;
+            };
+            // Tauri owns this NSWindow and the cloned handle lives through the callback.
+            let native = unsafe { handle.cast::<NSWindow>().as_ref() };
+            let Some(native) = native else {
+                return;
+            };
+            if native.styleMask().contains(NSWindowStyleMask::FullScreen) {
+                return;
+            }
+            let settings = NSUserDefaults::standardUserDefaults();
+            let preference = settings
+                .stringForKey(ns_string!("AppleActionOnDoubleClick"))
+                .map(|value| value.to_string());
+            match preference.as_deref() {
+                Some("Minimize") => native.performMiniaturize(None),
+                Some("Fill") => {
+                    if let (Some(screen), Ok(mut previous)) =
+                        (native.screen(), FRAME_BEFORE_FILL.lock())
+                    {
+                        let available = screen.visibleFrame();
+                        if native.frame() == available {
+                            if let Some(frame) = previous.take() {
+                                let frame =
+                                    native.constrainFrameRect_toScreen(frame, Some(&screen));
+                                native.setFrame_display_animate(frame, true, true);
+                            } else {
+                                native.performZoom(None);
+                            }
+                        } else {
+                            *previous = Some(native.frame());
+                            native.setFrame_display_animate(available, true, true);
+                        }
+                    }
+                }
+                Some("Maximize" | "Zoom") => native.performZoom(None),
+                None if settings.boolForKey(ns_string!("AppleMiniaturizeOnDoubleClick")) => {
+                    native.performMiniaturize(None);
+                }
+                None => native.performZoom(None),
+                // Includes the system's explicit "None" preference.
+                Some(_) => {}
+            }
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod config_tests {
+    use serde_json::{json, Value};
+
+    #[test]
+    fn the_macos_override_preserves_the_shared_window_configuration() {
+        let base: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let macos: Value = serde_json::from_str(include_str!("../tauri.macos.conf.json")).unwrap();
+        let mut expected = base["app"]["windows"].clone();
+        assert_eq!(expected[0]["decorations"], false);
+        expected[0]["decorations"] = json!(true);
+        expected[0]["titleBarStyle"] = json!("Overlay");
+        expected[0]["hiddenTitle"] = json!(true);
+        expected[0]["trafficLightPosition"] = json!({ "x": 14, "y": 15 });
+        // Tauri replaces the array as a unit, so the override carries the complete window.
+        assert_eq!(macos["app"]["windows"], expected);
+    }
+}

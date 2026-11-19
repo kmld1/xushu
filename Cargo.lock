@@ -4343,6 +4343,8 @@ name = "xushu-desktop"
 version = "1.0.0"
 dependencies = [
  "chrono",
+ "objc2-app-kit",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "tauri",
