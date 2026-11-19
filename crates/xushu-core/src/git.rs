@@ -1,10 +1,9 @@
-use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::Command;
+use std::time::Duration;
 
 use crate::error::CoreError;
+use crate::runner::{execute_command, ExecutionStatus, RunControl};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 const GIT_OUTPUT_LIMIT: usize = 1024 * 1024;
@@ -118,83 +117,24 @@ pub(crate) fn run_git_raw(
     timeout: Duration,
     max_bytes: usize,
 ) -> Result<GitRawOutput, CoreError> {
-    let mut child = Command::new("git")
-        .arg("-C")
+    let mut command = Command::new("git");
+    command
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .args(["-c", "core.fsmonitor=false", "-C"])
         .arg(path)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| CoreError::Git(format!("无法启动 git: {error}")))?;
-
-    let stdout_pipe = child
-        .stdout
-        .take()
-        .ok_or_else(|| CoreError::Git("无法读取 git stdout".to_owned()))?;
-    let stderr_pipe = child
-        .stderr
-        .take()
-        .ok_or_else(|| CoreError::Git("无法读取 git stderr".to_owned()))?;
-
-    let stdout_handle = thread::spawn(move || read_limited(stdout_pipe, max_bytes));
-    let stderr_handle = thread::spawn(move || read_limited(stderr_pipe, max_bytes));
-
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = stdout_handle.join();
-                let _ = stderr_handle.join();
-                return Err(CoreError::Git("Git 命令超时".to_owned()));
-            }
-            Ok(None) => thread::sleep(Duration::from_millis(20)),
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = stdout_handle.join();
-                let _ = stderr_handle.join();
-                return Err(CoreError::Git(format!("等待 Git 失败: {error}")));
-            }
-        }
-    };
-
-    let (stdout, _stdout_bytes, stdout_truncated) = stdout_handle.join().unwrap_or_default();
-    let (stderr, _stderr_bytes, _stderr_truncated) = stderr_handle.join().unwrap_or_default();
-
-    Ok(GitRawOutput {
-        success: status.success(),
-        stdout,
-        stderr,
-        stdout_truncated,
-    })
-}
-
-fn read_limited(mut pipe: impl Read, max_bytes: usize) -> (Vec<u8>, u64, bool) {
-    let mut kept = Vec::new();
-    let mut total = 0_u64;
-    let mut buffer = [0_u8; 16 * 1024];
-
-    loop {
-        match pipe.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(read) => {
-                total += read as u64;
-                if kept.len() < max_bytes {
-                    let remaining = max_bytes - kept.len();
-                    let take = remaining.min(read);
-                    kept.extend_from_slice(&buffer[..take]);
-                }
-            }
-            Err(_) => break,
-        }
+        .args(args);
+    let result = execute_command(command, timeout, max_bytes, &RunControl::new());
+    if result.execution_status != ExecutionStatus::Completed {
+        return Err(CoreError::Git(
+            result.note.unwrap_or_else(|| "Git 命令未完成".to_owned()),
+        ));
     }
-
-    let truncated = total > max_bytes as u64;
-    (kept, total, truncated)
+    Ok(GitRawOutput {
+        success: result.exit_code == Some(0),
+        stdout: result.stdout,
+        stderr: result.stderr,
+        stdout_truncated: result.stdout_truncated,
+    })
 }
 
 pub(crate) fn normalize_display_path(path: PathBuf) -> PathBuf {

@@ -248,8 +248,13 @@ pub(super) fn open_isolated_payload(
     path: &Path,
     schema_version: i64,
 ) -> Result<Database, CoreError> {
-    let mut source = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
-        .map_err(|error| isolated_payload_error("打开隔离副本", error.into()))?;
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE;
+    #[cfg(unix)]
+    let source =
+        super::paths::open_checked_sqlite(path, flags, super::paths::SqliteAccess::Existing);
+    #[cfg(windows)]
+    let source = Connection::open_with_flags(path, flags).map_err(CoreError::from);
+    let mut source = source.map_err(|error| isolated_payload_error("打开隔离副本", error))?;
     validate_isolated_schema(&mut source, schema_version)
         .map_err(|error| isolated_payload_error("核对隔离副本 Schema", error))?;
     Database::configure(&source)

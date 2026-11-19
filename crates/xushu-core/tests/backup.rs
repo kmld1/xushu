@@ -1183,6 +1183,33 @@ fn startup_recovery_rolls_back_an_interrupted_switch() {
 }
 
 #[test]
+fn restore_rejects_a_replaced_workspace_with_an_identical_payload() {
+    let (directory, database) = temp_database();
+    let record = create_backup(&database, directory.path());
+    let plan = open_preflight(&database, directory.path(), &record)
+        .plan
+        .unwrap();
+    let restore = RestoreService::new(&database, directory.path());
+    let mut journal = restore.create_rollback("workspace-identity-test").unwrap();
+    let moved = plan.workspace_directory.with_file_name("moved-workspace");
+    fs::rename(&plan.workspace_directory, &moved).unwrap();
+    fs::create_dir(&plan.workspace_directory).unwrap();
+    fs::copy(moved.join("xushu.db"), &plan.isolated_database).unwrap();
+    let original_sha = file_sha256(database.path());
+
+    assert!(matches!(
+        RestoreService::revalidate(&plan),
+        Err(CoreError::UnsafePath)
+    ));
+    RestoreService::begin_switch(directory.path(), &mut journal, &plan).unwrap();
+    assert!(matches!(
+        RestoreService::switch_files(directory.path(), &journal, &plan),
+        Err(CoreError::UnsafePath)
+    ));
+    assert_eq!(file_sha256(database.path()), original_sha);
+}
+
+#[test]
 fn failed_rollback_preserves_the_current_file_when_recovery_sources_are_unavailable() {
     let (directory, database) = temp_database();
     let operation_id = Uuid::new_v4().to_string();

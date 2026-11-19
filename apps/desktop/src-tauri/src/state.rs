@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use chrono::{SecondsFormat, Utc};
 use uuid::Uuid;
@@ -32,6 +32,7 @@ pub struct AppState {
     database: Arc<Mutex<Option<Database>>>,
     startup_error: Option<ApiError>,
     controls: Arc<Mutex<HashMap<String, Arc<RunControl>>>>,
+    shutting_down: Arc<AtomicBool>,
     exports_directory: Arc<PathBuf>,
     data_directory: Arc<PathBuf>,
     claude_runtime: Option<Arc<ClaudeRuntimePaths>>,
@@ -48,9 +49,7 @@ impl AppState {
     pub fn initialize(data_directory: &Path) -> Self {
         let exports_directory = data_directory.join("exports");
         let data_directory = Arc::new(data_directory.to_path_buf());
-        let data_lock = fs::create_dir_all(&*data_directory)
-            .map_err(CoreError::from)
-            .and_then(|()| lock_data_directory(&data_directory));
+        let data_lock = lock_data_directory(&data_directory);
         let claude_runtime = match &data_lock {
             Ok(_) => {
                 if !cfg!(test) {
@@ -174,6 +173,7 @@ impl AppState {
                     database: Arc::new(Mutex::new(Some(database))),
                     startup_error: None,
                     controls: Arc::new(Mutex::new(HashMap::new())),
+                    shutting_down: Arc::new(AtomicBool::new(false)),
                     exports_directory: Arc::new(exports_directory),
                     data_directory,
                     claude_runtime,
@@ -201,6 +201,7 @@ impl AppState {
                         ),
                     }),
                     controls: Arc::new(Mutex::new(HashMap::new())),
+                    shutting_down: Arc::new(AtomicBool::new(false)),
                     exports_directory: Arc::new(exports_directory),
                     data_directory,
                     claude_runtime,
@@ -339,6 +340,9 @@ impl AppState {
             let mut controls = self.controls.lock().map_err(|_| {
                 ApiError::new("VERIFICATION_ERROR", "验证运行注册表暂时不可用，请重试")
             })?;
+            if self.shutting_down.load(Ordering::Acquire) {
+                return Err(ApiError::new("VERIFICATION_ERROR", "应用正在退出"));
+            }
             controls.insert(prepared.run.id.clone(), control.clone());
         }
 
@@ -370,6 +374,15 @@ impl AppState {
         });
 
         Ok(run)
+    }
+
+    pub fn stop_verifications(&self) {
+        self.shutting_down.store(true, Ordering::Release);
+        if let Ok(controls) = self.controls.lock() {
+            for control in controls.values() {
+                control.cancel();
+            }
+        }
     }
 
     pub fn cancel_verification(&self, run_id: &str) -> Result<(), ApiError> {
@@ -880,38 +893,34 @@ fn resolve_hook_binary() -> Option<PathBuf> {
 /// 生产安装包必须能区分“sidecar 缺失、损坏、版本不一致”和可用接收器。
 /// 只执行固定的 `--version` 参数，不经过 shell，也不接受用户输入。
 fn verify_hook_binary(path: &Path) -> bool {
-    if !path.is_file() {
+    if !fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file()) {
         logging::record_error("sidecar_probe_failed", "missing");
         return false;
     }
-
-    let mut command = Command::new(path);
-    command
-        .arg("--version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-
-    let output = match command.output() {
-        Ok(output) => output,
-        Err(_) => {
-            logging::record_error("sidecar_probe_failed", "spawn_failed");
-            return false;
-        }
+    let (Some(executable), Some(directory)) = (path.to_str(), path.parent()) else {
+        logging::record_error("sidecar_probe_failed", "invalid_path");
+        return false;
     };
-    if !output.status.success() {
+    let output = runner::execute(
+        &runner::RunPlan {
+            executable: executable.to_owned(),
+            args: vec!["--version".to_owned()],
+            cwd: directory.to_path_buf(),
+            timeout: Duration::from_secs(3),
+            output_limit_bytes: 4096,
+        },
+        &RunControl::new(),
+    );
+    if output.execution_status != runner::ExecutionStatus::Completed {
+        logging::record_error("sidecar_probe_failed", output.execution_status.as_str());
+        return false;
+    }
+    if output.exit_code != Some(0) {
         logging::record_error("sidecar_probe_failed", "nonzero_exit");
         return false;
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if hook_version_matches(&stdout, env!("CARGO_PKG_VERSION")) {
+    if !output.stdout_truncated && hook_version_matches(&output.stdout, env!("CARGO_PKG_VERSION")) {
         true
     } else {
         logging::record_error("sidecar_probe_failed", "version_mismatch");
@@ -933,6 +942,21 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn sidecar_startup_probe_stops_a_slow_receiver() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::{Duration, Instant};
+
+        let fixture = TempDir::new().unwrap();
+        let receiver = fixture.path().join("xushu-hook");
+        fs::write(&receiver, b"#!/bin/sh\n/bin/sleep 5\n").unwrap();
+        fs::set_permissions(&receiver, fs::Permissions::from_mode(0o700)).unwrap();
+        let started = Instant::now();
+        assert!(!verify_hook_binary(&receiver));
+        assert!(started.elapsed() < Duration::from_secs(4));
+    }
 
     #[test]
     fn unresolved_startup_restore_never_creates_a_replacement_database() {

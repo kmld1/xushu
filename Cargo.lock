@@ -4322,11 +4322,12 @@ dependencies = [
 
 [[package]]
 name = "xushu-core"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "regex",
  "rusqlite",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",
@@ -4339,7 +4340,7 @@ dependencies = [
 
 [[package]]
 name = "xushu-desktop"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "serde",
@@ -4354,7 +4355,7 @@ dependencies = [
 
 [[package]]
 name = "xushu-hook"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "serde_json",
  "tempfile",
@@ -4363,7 +4364,7 @@ dependencies = [
 
 [[package]]
 name = "xushu-hook-protocol"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "serde",

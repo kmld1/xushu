@@ -118,7 +118,7 @@ def run(args, **kwargs):
     return completed
 
 
-def node_scenario(port, mode, repo, git_executable):
+def node_scenario(port, mode, repo, git_executable, expected_version=""):
     run(
         [
             "node",
@@ -128,6 +128,7 @@ def node_scenario(port, mode, repo, git_executable):
             str(repo),
             git_executable,
             str(WORK),
+            expected_version,
         ],
         cwd=ROOT,
         timeout=420,
@@ -443,6 +444,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--installer", type=Path, required=True)
     parser.add_argument("--upgrade-installer", type=Path)
+    parser.add_argument("--version", default="0.1.0")
+    parser.add_argument("--upgrade-version", default="0.1.1")
+    parser.add_argument(
+        "--skip-production-fingerprint",
+        action="store_true",
+        help="Do not inspect or read the production user database at any point.",
+    )
     parser.add_argument("--work-dir", type=Path, default=WORK)
     parser.add_argument("--product-name", default=PRODUCT_NAME)
     parser.add_argument("--install-dir", type=Path)
@@ -463,10 +471,12 @@ def main():
     for directory in (DATA, install_dir, fixture.parent, relocated):
         require_fresh_directory(directory)
     installer = args.installer.resolve()
-    v1_digest = require_isolated_installer(installer, DATA, args.product_name, "0.1.0")
+    v1_digest = require_isolated_installer(installer, DATA, args.product_name, args.version)
     if args.upgrade_installer:
         upgrade_installer = args.upgrade_installer.resolve()
-        v2_digest = require_isolated_installer(upgrade_installer, DATA, args.product_name, "0.1.1")
+        v2_digest = require_isolated_installer(
+            upgrade_installer, DATA, args.product_name, args.upgrade_version
+        )
 
     shortcut = (
         Path(os.environ["APPDATA"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
@@ -482,7 +492,7 @@ def main():
     ensure_port_free(CDP_PORT)
 
     normal_database = Path(os.environ["APPDATA"]) / NORMAL_IDENTIFIER / "xushu.db"
-    normal_before = fingerprint(normal_database)
+    normal_before = None if args.skip_production_fingerprint else fingerprint(normal_database)
 
     WORK.mkdir(parents=True, exist_ok=True)
     fixture.parent.mkdir(parents=True)
@@ -500,7 +510,6 @@ def main():
                 "servicePack": sys.getwindowsversion().service_pack,
             },
             "python": sys.version,
-            "normalDatabase": str(normal_database),
         },
         "installer": install_evidence(args.installer.resolve()),
         "installDirectory": str(install_dir),
@@ -511,12 +520,12 @@ def main():
     main_exe = install(installer, install_dir, clean=True, expected_digest=v1_digest)
     evidence["installedBinary"] = str(main_exe)
     evidence["installedVersion1"] = file_version(main_exe)
-    require("0.1.0" in evidence["installedVersion1"], "unexpected version in installed v1 binary")
+    require(args.version in evidence["installedVersion1"], "unexpected version in installed v1 binary")
 
     port = CDP_PORT
     app = launch(main_exe, DATA, port)
     try:
-        node_scenario(port, "full", fixture, git_executable)
+        node_scenario(port, "full", fixture, git_executable, args.version)
         wait_exit(app)
     finally:
         if app.poll() is None:
@@ -540,7 +549,7 @@ def main():
     reopened = json.loads((WORK / "installed-reopen-result.json").read_text(encoding="utf-8"))
     require(reopened["integration"]["eventCount"] >= 1, "sidecar event missing after reopen")
     log_text = read_log()
-    require("app_start version=0.1.0" in log_text, "app_start missing from diagnostic log")
+    require(f"app_start version={args.version}" in log_text, "app_start missing from diagnostic log")
     require("database_ready schema=7" in log_text, "database readiness missing from diagnostic log")
     require("app_exit" in log_text, "normal exit was not recorded in the diagnostic log")
     full_result = json.loads((WORK / "installed-full-result.json").read_text(encoding="utf-8"))
@@ -562,12 +571,15 @@ def main():
         evidence["upgradeInstaller"] = install_evidence(upgrade_installer)
         main_exe = install(upgrade_installer, install_dir, clean=False, expected_digest=v2_digest)
         evidence["installedVersion2"] = file_version(main_exe)
-        require("0.1.1" in evidence["installedVersion2"], "upgrade did not install version 0.1.1")
+        require(
+            args.upgrade_version in evidence["installedVersion2"],
+            "upgrade did not install the expected version",
+        )
 
         port = CDP_PORT
         app = launch(main_exe, DATA, port)
         try:
-            node_scenario(port, "upgrade", fixture, git_executable)
+            node_scenario(port, "upgrade", fixture, git_executable, args.upgrade_version)
             wait_exit(app)
         finally:
             if app.poll() is None:
@@ -704,9 +716,12 @@ def main():
         "dataEntriesBefore": len(data_before_uninstall),
     }
 
-    normal_after = fingerprint(normal_database)
-    require(normal_after == normal_before, "normal user database changed during installed E2E")
-    evidence["normalDatabaseUnchanged"] = True
+    if args.skip_production_fingerprint:
+        evidence["normalDatabaseFingerprint"] = "NOT_RUN_BY_REQUEST"
+    else:
+        require(fingerprint(normal_database) == normal_before,
+                "normal user database changed during installed E2E")
+        evidence["normalDatabaseUnchanged"] = True
 
     (WORK / "installed-e2e-report.json").write_text(
         json.dumps(evidence, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"

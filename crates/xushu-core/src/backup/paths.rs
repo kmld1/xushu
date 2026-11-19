@@ -3,38 +3,28 @@
 //! 这里不把字符串前缀比较当作安全判断：目录通过已打开的句柄与重解析点属性
 //! 校验，文件以不跟随符号链接的方式打开，并在读取时强制大小上限。
 
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-use crate::claude::path_guard::{redirected, regular_file_options, Directories};
+use crate::claude::path_guard::{Directories, FileAccess};
 use crate::error::CoreError;
 
 pub(crate) const COPY_BUFFER_BYTES: usize = 64 * 1024;
 
 /// Keep one desktop process in charge of database startup and file switching.
 pub fn lock_data_directory(path: &Path) -> Result<File, CoreError> {
-    let directory = secure_directory(path)?;
-    let mut options = regular_file_options();
+    #[cfg(unix)]
+    let directory = Directories::open_sqlite_parent(path, true).map_err(map_path_error)?;
     #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
-        options.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE);
-    }
-    let file = options
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(directory.canonical.join("xushu.db.lock"))
+    std::fs::create_dir_all(path)?;
+    #[cfg(windows)]
+    let directory = secure_directory(path)?;
+    let file = directory
+        .open_file("xushu.db.lock", FileAccess::Lock)
         .map_err(map_path_error)?;
-    let metadata = file.metadata().map_err(map_path_error)?;
-    if !metadata.is_file() || redirected(&metadata) {
-        return Err(CoreError::UnsafePath);
-    }
     file.try_lock().map_err(|error| match error {
         std::fs::TryLockError::WouldBlock => {
             CoreError::Conflict("另一个序枢进程正在使用此数据库".to_owned())
@@ -56,18 +46,16 @@ pub(crate) fn secure_directory(path: &Path) -> Result<Directories, CoreError> {
 pub(crate) fn prepare_directory(path: &Path) -> Result<Directories, CoreError> {
     validate_absolute(path)?;
 
-    if path.exists() {
-        let metadata = fs::symlink_metadata(path).map_err(map_path_error)?;
-        if !metadata.is_dir() || redirected(&metadata) {
-            return Err(CoreError::UnsafePath);
-        }
-        return secure_directory(path);
+    match secure_directory(path) {
+        Err(CoreError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {}
+        result => return result,
     }
 
     let parent = path.parent().ok_or(CoreError::UnsafePath)?;
-    let _parent = secure_directory(parent)?;
-    fs::create_dir(path).map_err(map_path_error)?;
-    secure_directory(path)
+    let name = path.file_name().ok_or(CoreError::UnsafePath)?;
+    let parent = secure_directory(parent)?;
+    parent.create_child(name).map_err(map_path_error)?;
+    parent.open_child(name).map_err(map_path_error)
 }
 
 pub(crate) fn validate_absolute(path: &Path) -> Result<(), CoreError> {
@@ -95,7 +83,7 @@ pub(crate) fn validate_absolute(path: &Path) -> Result<(), CoreError> {
     Ok(())
 }
 
-fn map_path_error(error: io::Error) -> CoreError {
+pub(super) fn map_path_error(error: io::Error) -> CoreError {
     if error.kind() == io::ErrorKind::InvalidInput {
         CoreError::UnsafePath
     } else {
@@ -103,20 +91,104 @@ fn map_path_error(error: io::Error) -> CoreError {
     }
 }
 
-fn open_regular_file(path: &Path) -> Result<(File, u64), CoreError> {
-    let file = regular_file_options()
-        .read(true)
-        .open(path)
+fn open_file(path: &Path, access: FileAccess) -> Result<File, CoreError> {
+    let parent = path.parent().ok_or(CoreError::UnsafePath)?;
+    let name = path.file_name().ok_or(CoreError::UnsafePath)?;
+    secure_directory(parent)?
+        .open_file(name, access)
+        .map_err(map_path_error)
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SqliteAccess {
+    Existing,
+    OpenOrCreate,
+    CreateNew,
+}
+
+#[cfg(unix)]
+pub(crate) fn open_checked_sqlite(
+    path: &Path,
+    flags: rusqlite::OpenFlags,
+    access: SqliteAccess,
+) -> Result<rusqlite::Connection, CoreError> {
+    use rusqlite::{Connection, OpenFlags};
+
+    let absolute;
+    let path = if path.is_absolute() {
+        path
+    } else {
+        absolute = std::env::current_dir()?.join(path);
+        &absolute
+    };
+    let parent_path = path.parent().ok_or(CoreError::UnsafePath)?;
+    let parent = Directories::open_sqlite_parent(parent_path, access == SqliteAccess::OpenOrCreate)
         .map_err(map_path_error)?;
-    let metadata = file.metadata().map_err(map_path_error)?;
-    if !metadata.is_file() || redirected(&metadata) {
+    let name = path.file_name().ok_or(CoreError::UnsafePath)?;
+    let check_auxiliary = |directory: &Directories| -> Result<(), CoreError> {
+        for suffix in ["-journal", "-wal", "-shm"] {
+            let mut side_file = name.to_os_string();
+            side_file.push(suffix);
+            let entry = directory
+                .sqlite_file_identity(&side_file)
+                .map_err(map_path_error)?;
+            if entry.is_some() && access == SqliteAccess::CreateNew {
+                return Err(CoreError::Conflict(
+                    "备份目标已有 SQLite 辅助文件".to_owned(),
+                ));
+            }
+        }
+        Ok(())
+    };
+    check_auxiliary(&parent)?;
+    let existing = parent.sqlite_file_identity(name).map_err(map_path_error)?;
+    if existing.is_some() && access == SqliteAccess::CreateNew {
+        return Err(CoreError::Conflict("备份目标文件已存在".to_owned()));
+    }
+    if existing.is_none() && access != SqliteAccess::Existing {
+        // SQLite's CREATE flag is not exclusive. Reserve the name with O_EXCL at
+        // the authorized directory instead, before entering the path-based VFS.
+        match parent.open_file(name, FileAccess::CreateNew) {
+            Err(error)
+                if access == SqliteAccess::OpenOrCreate
+                    && error.kind() == io::ErrorKind::AlreadyExists => {}
+            result => drop(result.map_err(map_path_error)?),
+        }
+    }
+    let expected = parent
+        .sqlite_file_identity(name)
+        .map_err(map_path_error)?
+        .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
+    if existing.is_some_and(|identity| identity != expected) {
         return Err(CoreError::UnsafePath);
     }
-    Ok((file, metadata.len()))
+    let connection = Connection::open_with_flags(
+        parent.canonical.join(name),
+        flags.difference(OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_URI)
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )?;
+    let after =
+        Directories::open_sqlite_parent(&parent.canonical, false).map_err(map_path_error)?;
+    if after.identity != parent.identity
+        || after
+            .sqlite_file_identity(name)
+            .map_err(map_path_error)?
+            .as_ref()
+            != Some(&expected)
+    {
+        return Err(CoreError::UnsafePath);
+    }
+    check_auxiliary(&after)?;
+    Ok(connection)
 }
 
 pub(crate) fn read_bounded_file(path: &Path, max_bytes: u64) -> Result<Vec<u8>, CoreError> {
-    let (file, size) = open_regular_file(path)?;
+    read_bounded(open_file(path, FileAccess::Read)?, max_bytes)
+}
+
+pub(super) fn read_bounded(file: File, max_bytes: u64) -> Result<Vec<u8>, CoreError> {
+    let size = file.metadata()?.len();
     if size > max_bytes {
         return Err(CoreError::Validation("文件超过允许的大小上限".to_owned()));
     }
@@ -131,7 +203,11 @@ pub(crate) fn read_bounded_file(path: &Path, max_bytes: u64) -> Result<Vec<u8>, 
 }
 
 pub(crate) fn sha256_file(path: &Path, max_bytes: u64) -> Result<(String, u64), CoreError> {
-    let (mut file, size) = open_regular_file(path)?;
+    sha256_reader(&mut open_file(path, FileAccess::Read)?, max_bytes)
+}
+
+pub(super) fn sha256_reader(file: &mut File, max_bytes: u64) -> Result<(String, u64), CoreError> {
+    let size = file.metadata()?.len();
     if size > max_bytes {
         return Err(CoreError::Validation(
             "备份数据文件超过允许的大小上限".to_owned(),
@@ -161,18 +237,26 @@ pub(crate) fn copy_regular_file_bounded(
     destination: &Path,
     max_bytes: u64,
 ) -> Result<u64, CoreError> {
-    let (mut source_file, size) = open_regular_file(source)?;
+    copy_bounded(
+        open_file(source, FileAccess::Read)?,
+        || open_file(destination, FileAccess::CreateNew),
+        max_bytes,
+    )
+}
+
+pub(super) fn copy_bounded(
+    mut source_file: File,
+    destination: impl FnOnce() -> Result<File, CoreError>,
+    max_bytes: u64,
+) -> Result<u64, CoreError> {
+    let size = source_file.metadata()?.len();
     if size > max_bytes {
         return Err(CoreError::Validation(
             "备份数据文件超过允许的大小上限".to_owned(),
         ));
     }
 
-    let mut destination_file = regular_file_options()
-        .write(true)
-        .create_new(true)
-        .open(destination)
-        .map_err(map_path_error)?;
+    let mut destination_file = destination()?;
 
     let mut buffer = vec![0_u8; COPY_BUFFER_BYTES];
     let mut total = 0_u64;
@@ -202,11 +286,10 @@ pub(crate) fn copy_regular_file_bounded(
 }
 
 pub(crate) fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), CoreError> {
-    let mut file = regular_file_options()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(map_path_error)?;
+    write_and_sync(open_file(path, FileAccess::CreateNew)?, bytes)
+}
+
+fn write_and_sync(mut file: File, bytes: &[u8]) -> Result<(), CoreError> {
     file.write_all(bytes).map_err(CoreError::Io)?;
     file.sync_all().map_err(CoreError::Io)?;
     Ok(())
@@ -215,22 +298,56 @@ pub(crate) fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), CoreError>
 /// 以同目录临时文件 + 原子替换写入小型状态文件（恢复日志）。
 pub(crate) fn atomic_replace_file(path: &Path, bytes: &[u8]) -> Result<(), CoreError> {
     let parent = path.parent().ok_or(CoreError::UnsafePath)?;
-    let _guard = secure_directory(parent)?;
-    let file_name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .ok_or(CoreError::UnsafePath)?;
-    let temporary = parent.join(format!(".{file_name}.{}.tmp", uuid::Uuid::new_v4()));
-    write_new_file(&temporary, bytes)?;
+    let guard = secure_directory(parent)?;
+    atomic_replace_in(
+        &guard,
+        path.file_name().ok_or(CoreError::UnsafePath)?,
+        bytes,
+    )
+}
 
+pub(super) fn atomic_replace_in(
+    guard: &Directories,
+    file_name: &std::ffi::OsStr,
+    bytes: &[u8],
+) -> Result<(), CoreError> {
+    let file_name = file_name.to_str().ok_or(CoreError::UnsafePath)?;
+    guard.has_regular_file(file_name).map_err(map_path_error)?;
+    let temporary = format!(".{file_name}.{}.tmp", uuid::Uuid::new_v4());
+    let file = guard
+        .open_file(&temporary, FileAccess::CreateNew)
+        .map_err(map_path_error)?;
+    let result = write_and_sync(file, bytes).and_then(|()| {
+        guard.has_regular_file(file_name).map_err(map_path_error)?;
+        replace_in(guard, &temporary, file_name).map_err(map_path_error)
+    });
+    if result.is_err() {
+        let _ = guard.remove_file(&temporary);
+    }
+    result
+}
+
+fn replace_in(guard: &Directories, temporary: &str, file_name: &str) -> io::Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Storage::FileSystem::{
             MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
         };
-        let from: Vec<u16> = temporary.as_os_str().encode_wide().chain([0]).collect();
-        let to: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+        let from: Vec<u16> = guard
+            .canonical
+            .join(temporary)
+            .as_os_str()
+            .encode_wide()
+            .chain([0])
+            .collect();
+        let to: Vec<u16> = guard
+            .canonical
+            .join(file_name)
+            .as_os_str()
+            .encode_wide()
+            .chain([0])
+            .collect();
         let moved = unsafe {
             MoveFileExW(
                 from.as_ptr(),
@@ -239,18 +356,15 @@ pub(crate) fn atomic_replace_file(path: &Path, bytes: &[u8]) -> Result<(), CoreE
             )
         };
         if moved == 0 {
-            let error = io::Error::last_os_error();
-            let _ = fs::remove_file(&temporary);
-            return Err(CoreError::Io(error));
+            return Err(io::Error::last_os_error());
         }
+        Ok(())
     }
 
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     {
-        fs::rename(&temporary, path).map_err(CoreError::Io)?;
+        guard.rename_file(temporary, file_name)
     }
-
-    Ok(())
 }
 
 pub(crate) fn free_space_bytes(path: &Path) -> Option<u64> {
@@ -272,24 +386,23 @@ pub(crate) fn free_space_bytes(path: &Path) -> Option<u64> {
         }
     }
 
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     {
-        let _ = path;
-        None
+        secure_directory(path).ok()?.free_space_bytes()
     }
 }
 
-/// 纯函数：给定可用空间与要求空间，返回是否足够。None 表示无法查询，不阻断。
+/// 只有能确认可用空间足够时才继续。
 pub(crate) fn capacity_ok(required: u64, available: Option<u64>) -> bool {
-    available.is_none_or(|free| free >= required)
+    available.is_some_and(|free| free >= required)
 }
 
-pub(crate) fn remove_known_files(directory: &Path, names: &[&str]) -> Result<(), CoreError> {
-    let _guard = secure_directory(directory)?;
+pub(super) fn remove_known_files(guard: &Directories, names: &[&str]) -> Result<(), CoreError> {
     for name in names {
-        let path = directory.join(name);
-        if path.exists() {
-            fs::remove_file(&path).map_err(CoreError::Io)?;
+        match guard.remove_file(name) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(map_path_error(error)),
         }
     }
     Ok(())
@@ -334,13 +447,22 @@ pub(crate) fn join_relative(directory: &Path, relative: &str) -> Result<PathBuf,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use tempfile::TempDir;
 
     #[test]
     fn capacity_rule_is_conservative() {
         assert!(capacity_ok(100, Some(100)));
-        assert!(capacity_ok(100, None));
+        assert!(!capacity_ok(100, None));
         assert!(!capacity_ok(101, Some(100)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_capacity_is_measured_on_the_open_directory() {
+        let directory = TempDir::new().unwrap();
+        assert!(free_space_bytes(directory.path()).is_some());
+        assert!(free_space_bytes(&directory.path().join("missing")).is_none());
     }
 
     #[test]
@@ -382,5 +504,32 @@ mod tests {
         atomic_replace_file(&path, b"first").expect("first write");
         atomic_replace_file(&path, b"second").expect("second write");
         assert_eq!(fs::read(&path).expect("read"), b"second");
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn regular_reads_and_atomic_writes_reject_redirected_entries() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = TempDir::new().unwrap();
+        let root = fixture.path().canonicalize().unwrap();
+        let outside = root.join("outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("journal"), b"untouched").unwrap();
+        symlink(&outside, root.join("directory-link")).unwrap();
+        symlink(outside.join("journal"), root.join("file-link")).unwrap();
+
+        for path in [root.join("file-link"), root.join("directory-link/journal")] {
+            assert!(matches!(
+                read_bounded_file(&path, 32),
+                Err(CoreError::UnsafePath)
+            ));
+            assert!(matches!(
+                atomic_replace_file(&path, b"replacement"),
+                Err(CoreError::UnsafePath)
+            ));
+        }
+        assert_eq!(fs::read(outside.join("journal")).unwrap(), b"untouched");
     }
 }

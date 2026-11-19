@@ -541,6 +541,65 @@ fn cancellation_kills_child_process_tree() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn unix_runner_cleans_up_descendants_with_inherited_pipes() {
+    use std::time::Instant;
+
+    let fixture = TempDir::new().unwrap();
+    let outcomes = [
+        runner::ExecutionStatus::Completed,
+        runner::ExecutionStatus::Cancelled,
+        runner::ExecutionStatus::TimedOut,
+    ];
+    for (index, expected) in outcomes.into_iter().enumerate() {
+        let marker = fixture.path().join(format!("descendant-{index}"));
+        let ready = fixture.path().join(format!("ready-{index}"));
+        let plan = runner::RunPlan {
+            executable: "node".to_owned(),
+            args: [
+                "-e",
+                "const [ready, marker, linger] = process.argv.slice(1);
+                 const child = require('child_process').spawn(process.execPath, [
+                   '-e', 'setTimeout(() => require(\"fs\").writeFileSync(process.argv[1], \"late\"), 2000)',
+                   marker
+                 ], {stdio: 'inherit'});
+                 child.once('spawn', () => {
+                   require('fs').writeFileSync(ready, 'started');
+                   if (linger === 'false') process.exit(0);
+                 });",
+                ready.to_str().unwrap(),
+                marker.to_str().unwrap(),
+                if expected == runner::ExecutionStatus::Completed { "false" } else { "true" },
+            ].map(str::to_owned).to_vec(),
+            cwd: fixture.path().to_owned(),
+            timeout: Duration::from_secs(if expected == runner::ExecutionStatus::TimedOut { 1 } else { 5 }),
+            output_limit_bytes: 4096,
+        };
+        let control = RunControl::new();
+        let run_control = control.clone();
+        let start = Instant::now();
+        let worker = thread::spawn(move || runner::execute(&plan, &run_control));
+        while !ready.exists() && start.elapsed() < Duration::from_secs(1) {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(ready.exists(), "fixture never started its descendant");
+        if expected == runner::ExecutionStatus::Cancelled {
+            control.cancel();
+        }
+        let outcome = worker.join().unwrap();
+        assert_eq!(outcome.execution_status, expected, "{:?}", outcome.note);
+        assert!(
+            start.elapsed() < Duration::from_millis(1800),
+            "{expected:?} waited for a descendant"
+        );
+    }
+    thread::sleep(Duration::from_secs(2));
+    for index in 0..outcomes.len() {
+        assert!(!fixture.path().join(format!("descendant-{index}")).exists());
+    }
+}
+
 #[test]
 fn output_limit_truncates_but_drains_pipe() {
     let (_repo_directory, repo) = init_repo();

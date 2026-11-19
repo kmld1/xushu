@@ -43,6 +43,7 @@ const BANNED_SHELLS: &[&str] = &[
     "mshta",
 ];
 
+#[cfg(windows)]
 const BANNED_WINDOWS_EXTENSIONS: &[&str] = &["bat", "cmd", "ps1", "vbs", "vbe", "js", "jse", "wsf"];
 
 // ---------------------------------------------------------------------------

@@ -358,3 +358,31 @@ fn database_creates_nested_parent_directories() {
     assert!(database_path.exists());
     assert_eq!(database.health().expect("health").schema_version, 7);
 }
+
+#[cfg(unix)]
+#[test]
+fn database_requires_a_protected_directory_and_private_new_file() {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = TempDir::new().unwrap();
+    let shared = fixture.path().join("shared");
+    fs::create_dir(&shared).unwrap();
+    fs::set_permissions(&shared, fs::Permissions::from_mode(0o777)).unwrap();
+    let invalid_database = shared.join("xushu.db");
+    assert!(matches!(
+        Database::open(&invalid_database),
+        Err(CoreError::UnsafePath)
+    ));
+    assert!(!invalid_database.exists());
+
+    let path = fixture.path().join("app-data/xushu.db");
+    let database = Database::open(&path).unwrap();
+    assert!(database.health().unwrap().ok);
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    drop(database);
+    assert!(Database::open(&path).unwrap().health().unwrap().ok);
+}

@@ -126,8 +126,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("运行序枢 XUSHU 桌面程序失败");
 
-    app.run(|_, event| {
+    app.run(|app, event| {
         if let RunEvent::Exit = event {
+            if let Some(state) = app.try_state::<AppState>() {
+                state.stop_verifications();
+            }
             logging::record("INFO", "app_exit");
         }
     });

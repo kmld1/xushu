@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
-const [, , portText, mode, repo, gitExecutable, workDirectory] = process.argv;
+const [, , portText, mode, repo, gitExecutable, workDirectory, expectedVersion] = process.argv;
 const port = Number(portText);
 const evidenceDirectory = workDirectory ?? path.resolve(process.cwd(), "target", "phase7a");
 fs.mkdirSync(evidenceDirectory, { recursive: true });
@@ -522,11 +522,12 @@ async function runSidecarUnavailable(desktop, expectedInstallState) {
 const desktop = await connect();
 try {
   if (mode === "full") {
-    await runFull(desktop);
+    const result = await runFull(desktop);
+    if (expectedVersion) assert.equal(result.appInfo.version, expectedVersion);
   } else if (mode === "reopen") {
     await runReopen(desktop, null, false);
   } else if (mode === "upgrade") {
-    await runReopen(desktop, "0.1.1", true);
+    await runReopen(desktop, expectedVersion || "0.1.1", true);
   } else if (mode === "upgrade-reopen") {
     await runReopen(desktop, null, true);
   } else if (mode === "sidecar-unavailable") {

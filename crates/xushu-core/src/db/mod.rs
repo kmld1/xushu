@@ -1,5 +1,6 @@
 mod migrations;
 
+#[cfg(windows)]
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,20 +31,31 @@ impl Database {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, CoreError> {
         let path = path.as_ref();
 
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)?;
+        #[cfg(unix)]
+        let conn = crate::backup::open_checked_sqlite(
+            path,
+            OpenFlags::default(),
+            crate::backup::SqliteAccess::OpenOrCreate,
+        )?;
+        #[cfg(windows)]
+        let conn = {
+            if let Some(parent) = path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    fs::create_dir_all(parent)?;
+                }
             }
-        }
-
-        Self::open_with_flags(path, OpenFlags::default())
+            Connection::open(path)?
+        };
+        Self::configure(&conn)?;
+        Self::from_configured_connection(path, conn)
     }
 
     pub(crate) fn open_existing(path: &Path) -> Result<Self, CoreError> {
-        Self::open_with_flags(path, OpenFlags::default() & !OpenFlags::SQLITE_OPEN_CREATE)
-    }
-
-    fn open_with_flags(path: &Path, flags: OpenFlags) -> Result<Self, CoreError> {
+        let flags = OpenFlags::default() & !OpenFlags::SQLITE_OPEN_CREATE;
+        #[cfg(unix)]
+        let conn =
+            crate::backup::open_checked_sqlite(path, flags, crate::backup::SqliteAccess::Existing)?;
+        #[cfg(windows)]
         let conn = Connection::open_with_flags(path, flags)?;
         Self::configure(&conn)?;
         Self::from_configured_connection(path, conn)
@@ -187,12 +199,20 @@ impl Database {
         destination: &Path,
         cancelled: &AtomicBool,
     ) -> Result<(), CoreError> {
+        #[cfg(windows)]
         if destination.exists() {
             return Err(CoreError::Conflict("备份目标文件已存在".to_owned()));
         }
 
         let conn = self.lock()?;
+        #[cfg(windows)]
         let mut destination_connection = Connection::open(destination)?;
+        #[cfg(unix)]
+        let mut destination_connection = crate::backup::open_checked_sqlite(
+            destination,
+            OpenFlags::default(),
+            crate::backup::SqliteAccess::CreateNew,
+        )?;
         destination_connection.busy_timeout(Duration::from_secs(5))?;
         destination_connection.pragma_update(None, "synchronous", "FULL")?;
 

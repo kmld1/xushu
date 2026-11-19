@@ -5,6 +5,7 @@
 //! 会优先回退到原数据库，而不是假定恢复已经成功。
 
 use std::fs;
+use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -13,6 +14,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::claude::path_guard::{Directories, FileAccess};
 use crate::db::{now_utc_rfc3339, Database, MIGRATIONS};
 use crate::error::CoreError;
 
@@ -24,8 +26,10 @@ use super::manifest::{
     BackupOrigin, MANIFEST_FILE_NAME, MAX_BACKUP_BYTES, PAYLOAD_FILE_NAME,
 };
 use super::paths::{
-    atomic_replace_file, capacity_ok, copy_regular_file_bounded, display_path, free_space_bytes,
-    prepare_directory, read_bounded_file, secure_directory, sha256_file, validate_absolute,
+    atomic_replace_file, atomic_replace_in, capacity_ok, copy_bounded, copy_regular_file_bounded,
+    display_path, free_space_bytes, map_path_error, prepare_directory, read_bounded,
+    read_bounded_file, remove_known_files, secure_directory, sha256_file, sha256_reader,
+    validate_absolute,
 };
 use super::service::database_file_sizes;
 
@@ -132,6 +136,7 @@ pub struct RestorePlan {
     pub expires_at: DateTime<Utc>,
     pub preflight: RestorePreflight,
     current_change_stamp: (u64, i64),
+    workspace_identity: String,
 }
 
 #[derive(Debug, Clone)]
@@ -305,11 +310,12 @@ impl<'a> RestoreService<'a> {
         let required_space = payload_size.saturating_add(RESTORE_SPACE_MARGIN);
         let capacity_available = free_space_bytes(self.data_directory);
         if !capacity_ok(required_space, capacity_available) {
-            checks.push(failed_check(
-                "disk_space",
-                "应用数据目录空间",
-                "隔离恢复所需空间不足",
-            ));
+            let reason = if capacity_available.is_none() {
+                "无法确认应用数据目录的可用空间，无法完成隔离恢复验证。"
+            } else {
+                "应用数据目录可用空间不足，无法完成隔离恢复验证。"
+            };
+            checks.push(failed_check("disk_space", "应用数据目录空间", reason));
             return Ok(RestorePreflightOutcome {
                 preflight: self.blocked_preflight(
                     &backup_directory,
@@ -321,7 +327,7 @@ impl<'a> RestoreService<'a> {
                     current_summary,
                     &changes_since_backup,
                     checks,
-                    "应用数据目录可用空间不足，无法完成隔离恢复验证。",
+                    reason,
                     warnings,
                     effects,
                     hooks_review,
@@ -339,8 +345,13 @@ impl<'a> RestoreService<'a> {
         let workspace_root = self.data_directory.join("restore-workspaces");
         let workspace_root_guard = prepare_directory(&workspace_root)?;
         let workspace_directory = workspace_root_guard.canonical.join(&token);
-        fs::create_dir(&workspace_directory).map_err(CoreError::Io)?;
-        let workspace_guard = secure_directory(&workspace_directory)?;
+        workspace_root_guard
+            .create_child(&token)
+            .map_err(map_path_error)?;
+        let workspace_guard = workspace_root_guard
+            .open_child(&token)
+            .map_err(map_path_error)?;
+        let workspace_identity = workspace_guard.identity.clone();
         let isolated_database = workspace_directory.join(PAYLOAD_FILE_NAME);
 
         let isolated_result =
@@ -372,7 +383,7 @@ impl<'a> RestoreService<'a> {
                     ));
                 }
                 compaction?;
-                remove_sidecars(&isolated_database);
+                remove_known_files(&workspace_guard, &["xushu.db-wal", "xushu.db-shm"])?;
                 let (isolated_sha, _) = sha256_file(&isolated_database, MAX_BACKUP_BYTES)?;
                 Ok((summary?, isolated_sha, report))
             })();
@@ -491,6 +502,7 @@ impl<'a> RestoreService<'a> {
             expires_at,
             preflight: preflight.clone(),
             current_change_stamp,
+            workspace_identity,
         };
 
         Ok(RestorePreflightOutcome {
@@ -559,7 +571,13 @@ impl<'a> RestoreService<'a> {
             .saturating_mul(2)
             .saturating_add(payload.saturating_mul(2))
             .saturating_add(RESTORE_SPACE_MARGIN);
-        if !capacity_ok(required, free_space_bytes(self.data_directory)) {
+        let available = free_space_bytes(self.data_directory);
+        if available.is_none() {
+            return Err(CoreError::Restore(
+                "无法确认应用数据目录的可用空间，已停止正式恢复".to_owned(),
+            ));
+        }
+        if !capacity_ok(required, available) {
             return Err(CoreError::Restore(format!(
                 "应用数据目录空间不足：正式恢复至少需要约 {} MiB 用于隔离、回退与切换副本",
                 required.div_ceil(1024 * 1024)
@@ -616,7 +634,10 @@ impl<'a> RestoreService<'a> {
             ));
         }
         let backup_guard = secure_directory(&plan.backup_directory)?;
-        let _workspace_guard = secure_directory(&plan.workspace_directory)?;
+        let workspace_guard = secure_directory(&plan.workspace_directory)?;
+        if workspace_guard.identity != plan.workspace_identity {
+            return Err(CoreError::UnsafePath);
+        }
         let manifest_read = read_manifest(&backup_guard.canonical)?;
         if manifest_read.manifest_sha256 != plan.manifest_sha256 {
             return Err(CoreError::Restore(
@@ -662,14 +683,18 @@ impl<'a> RestoreService<'a> {
         let rollback_root = self.data_directory.join("restore-rollback");
         let rollback_root_guard = prepare_directory(&rollback_root)?;
         let rollback_directory = rollback_root_guard.canonical.join(operation_id);
-        fs::create_dir(&rollback_directory).map_err(CoreError::Io)?;
-        let rollback_guard = secure_directory(&rollback_directory)?;
+        rollback_root_guard
+            .create_child(operation_id)
+            .map_err(map_path_error)?;
+        let rollback_guard = rollback_root_guard
+            .open_child(operation_id)
+            .map_err(map_path_error)?;
         let rollback_database = rollback_directory.join(ROLLBACK_FILE_NAME);
 
         let result = (|| -> Result<RestoreJournal, CoreError> {
             self.database.backup_to(&rollback_database)?;
             {
-                let snapshot = Database::open(&rollback_database)?;
+                let snapshot = Database::open_existing(&rollback_database)?;
                 snapshot.compact_for_backup()?;
                 let report = DataIntegrityService::new(&snapshot).check()?;
                 if !report.ok {
@@ -678,7 +703,10 @@ impl<'a> RestoreService<'a> {
                     ));
                 }
             }
-            remove_sidecars(&rollback_database);
+            remove_known_files(
+                &rollback_guard,
+                &["rollback-xushu.db-wal", "rollback-xushu.db-shm"],
+            )?;
             let (_, rollback_size) = sha256_file(&rollback_database, MAX_BACKUP_BYTES)?;
             if rollback_size == 0 {
                 return Err(CoreError::Restore("回退副本为空".to_owned()));
@@ -729,32 +757,47 @@ impl<'a> RestoreService<'a> {
     ) -> Result<u64, CoreError> {
         let current_database = PathBuf::from(&journal.current_database);
         let rollback_directory = PathBuf::from(&journal.rollback_directory);
-        let _rollback_guard = secure_directory(&rollback_directory)?;
-        let _workspace_guard = secure_directory(&plan.workspace_directory)?;
-        let current_parent = current_database.parent().ok_or(CoreError::UnsafePath)?;
-        let _parent_guard = secure_directory(current_parent)?;
-
-        if current_database.exists() {
-            fs::rename(&current_database, rollback_directory.join(ORIGINAL_PREFIX))
-                .map_err(CoreError::Io)?;
+        if current_database != data_directory.join(PAYLOAD_FILE_NAME)
+            || plan.isolated_database != plan.workspace_directory.join(PAYLOAD_FILE_NAME)
+        {
+            return Err(CoreError::UnsafePath);
         }
-        for suffix in ["-wal", "-shm"] {
-            let source = sidecar(&current_database, suffix);
-            if source.exists() {
-                fs::rename(
-                    &source,
-                    rollback_directory.join(format!("{ORIGINAL_PREFIX}{suffix}")),
-                )
-                .map_err(CoreError::Io)?;
-            }
+        let data = secure_directory(data_directory)?;
+        let rollback = validate_rollback_directory(&data, &rollback_directory)?;
+        let workspace = data
+            .open_child("restore-workspaces")
+            .and_then(|root| root.open_child(&plan.token))
+            .map_err(map_path_error)?;
+        if workspace.identity != plan.workspace_identity {
+            return Err(CoreError::UnsafePath);
+        }
+        let mut source = workspace
+            .open_file(PAYLOAD_FILE_NAME, FileAccess::Read)
+            .map_err(map_path_error)?;
+        if sha256_reader(&mut source, MAX_BACKUP_BYTES)?.0 != plan.isolated_sha256 {
+            return Err(CoreError::Restore(
+                "隔离恢复副本在预检后发生变化，请重新预检".to_owned(),
+            ));
+        }
+        source.seek(SeekFrom::Start(0))?;
+
+        for (name, suffix) in current_files(&data)? {
+            data.move_file(&name, &rollback, format!("{ORIGINAL_PREFIX}{suffix}"))
+                .map_err(map_path_error)?;
         }
 
-        let copied = copy_regular_file_bounded(
-            &plan.isolated_database,
-            &current_database,
+        let copied = copy_bounded(
+            source,
+            || {
+                data.open_file(PAYLOAD_FILE_NAME, FileAccess::CreateNew)
+                    .map_err(map_path_error)
+            },
             MAX_BACKUP_BYTES,
         )?;
-        let (copied_sha, _) = sha256_file(&current_database, MAX_BACKUP_BYTES)?;
+        let mut installed = data
+            .open_file(PAYLOAD_FILE_NAME, FileAccess::Read)
+            .map_err(map_path_error)?;
+        let (copied_sha, _) = sha256_reader(&mut installed, MAX_BACKUP_BYTES)?;
         if copied_sha != plan.isolated_sha256 {
             return Err(CoreError::Restore(
                 "切换后的数据库校验和与隔离副本不一致".to_owned(),
@@ -764,7 +807,7 @@ impl<'a> RestoreService<'a> {
         let mut updated = journal.clone();
         updated.stage = "switched".to_owned();
         updated.updated_at = now_utc_rfc3339();
-        write_journal(data_directory, &updated)?;
+        atomic_replace_in(&data, JOURNAL_FILE_NAME.as_ref(), &journal_bytes(&updated)?)?;
         Ok(copied)
     }
 
@@ -787,27 +830,34 @@ impl<'a> RestoreService<'a> {
         let directory_label = Some(display_path(Path::new(&journal.rollback_directory)));
 
         let result = (|| -> Result<(), CoreError> {
-            let _current_guard = secure_directory(data_directory)?;
-            let _rollback_guard = validate_rollback_directory(data_directory, &rollback_directory)?;
+            if current_database != data_directory.join(PAYLOAD_FILE_NAME) {
+                return Err(CoreError::UnsafePath);
+            }
+            let data = secure_directory(data_directory)?;
+            let rollback_guard = validate_rollback_directory(&data, &rollback_directory)?;
             let rollback_database = rollback_directory.join(ROLLBACK_FILE_NAME);
             if Path::new(&journal.rollback_database) != rollback_database {
                 return Err(CoreError::UnsafePath);
             }
             verify_database_health(&rollback_database)?;
+            let source = rollback_guard
+                .open_file(ROLLBACK_FILE_NAME, FileAccess::Read)
+                .map_err(map_path_error)?;
 
-            if current_database.exists() {
-                let interrupted = interrupted_name(&rollback_directory);
-                fs::rename(&current_database, &interrupted).map_err(CoreError::Io)?;
-            }
-            for suffix in ["-wal", "-shm"] {
-                let path = sidecar(&current_database, suffix);
-                if path.exists() {
-                    let interrupted = interrupted_name(&rollback_directory);
-                    fs::rename(&path, interrupted).map_err(CoreError::Io)?;
-                }
+            let interrupted = interrupted_name();
+            for (name, suffix) in current_files(&data)? {
+                data.move_file(&name, &rollback_guard, format!("{interrupted}{suffix}"))
+                    .map_err(map_path_error)?;
             }
 
-            copy_regular_file_bounded(&rollback_database, &current_database, MAX_BACKUP_BYTES)?;
+            copy_bounded(
+                source,
+                || {
+                    data.open_file(PAYLOAD_FILE_NAME, FileAccess::CreateNew)
+                        .map_err(map_path_error)
+                },
+                MAX_BACKUP_BYTES,
+            )?;
 
             let report = RestoreService::verify_restored_database(&current_database)?;
             if !report.ok {
@@ -847,13 +897,16 @@ impl<'a> RestoreService<'a> {
         let mut updated = journal.clone();
         updated.stage = outcome.to_owned();
         updated.updated_at = now_utc_rfc3339();
-        let source = data_directory.join(JOURNAL_FILE_NAME);
-        let destination = data_directory.join(format!(
+        let guard = secure_directory(data_directory)?;
+        let destination = format!(
             "restore-journal-{outcome}-{}.json",
             short_id(&journal.restore_id)
-        ));
-        write_journal(data_directory, &updated)?;
-        fs::rename(&source, &destination).map_err(CoreError::Io)?;
+        );
+        let bytes = journal_bytes(&updated)?;
+        atomic_replace_in(&guard, JOURNAL_FILE_NAME.as_ref(), &bytes)?;
+        guard
+            .rename_file(JOURNAL_FILE_NAME, destination)
+            .map_err(map_path_error)?;
         Ok(())
     }
 
@@ -948,44 +1001,53 @@ impl RestoreService<'_> {
 }
 
 pub fn cleanup_workspaces(data_directory: &Path) -> Result<(), CoreError> {
+    let data = secure_directory(data_directory)?;
     for root_name in ["restore-workspaces", "verify-workspaces"] {
-        cleanup_workspace_root(data_directory, root_name)?;
+        cleanup_workspace_root(&data, root_name)?;
     }
     Ok(())
 }
 
-fn cleanup_workspace_root(data_directory: &Path, root_name: &str) -> Result<(), CoreError> {
-    let root = data_directory.join(root_name);
-    if !root.exists() {
-        return Ok(());
-    }
-    let _guard = secure_directory(&root)?;
-    let entries = fs::read_dir(&root).map_err(CoreError::Io)?;
-    for entry in entries {
-        let entry = entry.map_err(CoreError::Io)?;
-        let file_type = entry.file_type().map_err(CoreError::Io)?;
-        if !file_type.is_dir() {
+fn cleanup_workspace_root(data: &Directories, root_name: &str) -> Result<(), CoreError> {
+    let root = match data.open_child(root_name) {
+        Ok(root) => root,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(map_path_error(error)),
+    };
+    for entry in root.names()? {
+        let name = entry?;
+        if !name
+            .to_str()
+            .is_some_and(|name| Uuid::parse_str(name).is_ok())
+        {
             continue;
         }
-        let name = entry.file_name().to_string_lossy().to_string();
-        if Uuid::parse_str(&name).is_err() {
-            continue;
-        }
-        let directory = entry.path();
+        let directory = match root.open_child(&name) {
+            Ok(directory) => directory,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::InvalidInput
+                        | std::io::ErrorKind::NotFound
+                        | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
+                continue
+            }
+            Err(error) => return Err(map_path_error(error)),
+        };
         let mut only_known = true;
-        if let Ok(children) = fs::read_dir(&directory) {
-            for child in children.flatten() {
-                let child_name = child.file_name().to_string_lossy().to_string();
-                if !matches!(
-                    child_name.as_str(),
-                    PAYLOAD_FILE_NAME | "xushu.db-wal" | "xushu.db-shm"
-                ) {
-                    only_known = false;
-                }
+        for child in directory.names()? {
+            if !matches!(
+                child?.to_str(),
+                Some(PAYLOAD_FILE_NAME | "xushu.db-wal" | "xushu.db-shm")
+            ) {
+                only_known = false;
+                break;
             }
         }
         if only_known {
-            cleanup_owned_workspace(&directory);
+            cleanup_workspace(&root, &name, directory);
         }
     }
     Ok(())
@@ -995,14 +1057,16 @@ pub fn recover_interrupted_restore(
     data_directory: &Path,
 ) -> Result<Option<RestoreStartupNotice>, CoreError> {
     let journal_path = data_directory.join(JOURNAL_FILE_NAME);
-    match fs::symlink_metadata(&journal_path) {
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(CoreError::Io(error)),
-    }
-    let _data_guard = secure_directory(data_directory)?;
+    let data_guard = secure_directory(data_directory)?;
     let journal_label = display_path(&journal_path);
-    let bytes = match read_bounded_file(&journal_path, JOURNAL_MAX_BYTES) {
+    let file = match data_guard.open_file(JOURNAL_FILE_NAME, FileAccess::Read) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        result => result,
+    };
+    let bytes = match file
+        .map_err(map_path_error)
+        .and_then(|file| read_bounded(file, JOURNAL_MAX_BYTES))
+    {
         Ok(bytes) => bytes,
         Err(_) => {
             return Ok(Some(RestoreStartupNotice {
@@ -1047,11 +1111,13 @@ pub fn recover_interrupted_restore(
                 Some(journal.rollback_directory()),
             )));
         }
-        let destination = data_directory.join(format!(
+        let destination = format!(
             "restore-journal-abandoned-{}.json",
             short_id(&journal.restore_id)
-        ));
-        let _ = fs::rename(&journal_path, destination);
+        );
+        data_guard
+            .rename_file(JOURNAL_FILE_NAME, destination)
+            .map_err(map_path_error)?;
         return Ok(Some(RestoreStartupNotice {
             outcome: "abandoned".to_owned(),
             message: "上次恢复在切换前中断；正式数据库没有被替换，回退副本已保留。".to_owned(),
@@ -1068,12 +1134,14 @@ pub fn recover_interrupted_restore(
         match verify_database_health(Path::new(&journal.current_database)) {
             Ok(()) => {
                 let completed = journal.stage == "completed";
-                let destination = data_directory.join(format!(
+                let destination = format!(
                     "restore-journal-{}-{}.json",
                     journal.stage,
                     short_id(&journal.restore_id)
-                ));
-                let _ = fs::rename(&journal_path, destination);
+                );
+                data_guard
+                    .rename_file(JOURNAL_FILE_NAME, destination)
+                    .map_err(map_path_error)?;
                 return Ok(Some(RestoreStartupNotice {
                     outcome: if completed {
                         "completed"
@@ -1135,16 +1203,33 @@ pub fn recover_interrupted_restore(
 }
 
 fn validate_rollback_directory(
-    data_directory: &Path,
+    data: &Directories,
     rollback_directory: &Path,
-) -> Result<crate::claude::path_guard::Directories, CoreError> {
-    let root = data_directory.join("restore-rollback");
-    let root = secure_directory(&root)?;
-    let rollback = secure_directory(rollback_directory)?;
-    if rollback.canonical.parent() != Some(root.canonical.as_path()) {
+) -> Result<Directories, CoreError> {
+    let root = data
+        .open_child("restore-rollback")
+        .map_err(map_path_error)?;
+    let requested_parent = rollback_directory.parent().ok_or(CoreError::UnsafePath)?;
+    if secure_directory(requested_parent)?.identity != root.identity {
         return Err(CoreError::UnsafePath);
     }
-    Ok(rollback)
+    root.open_child(
+        rollback_directory
+            .file_name()
+            .ok_or(CoreError::UnsafePath)?,
+    )
+    .map_err(map_path_error)
+}
+
+fn current_files(data: &Directories) -> Result<Vec<(String, &'static str)>, CoreError> {
+    let mut files = Vec::new();
+    for suffix in ["", "-wal", "-shm"] {
+        let name = format!("{PAYLOAD_FILE_NAME}{suffix}");
+        if data.has_regular_file(&name).map_err(map_path_error)? {
+            files.push((name, suffix));
+        }
+    }
+    Ok(files)
 }
 
 fn short_id(value: &str) -> String {
@@ -1165,9 +1250,15 @@ fn verify_database_health(path: &Path) -> Result<(), CoreError> {
 }
 
 fn write_journal(data_directory: &Path, journal: &RestoreJournal) -> Result<(), CoreError> {
-    let bytes = serde_json::to_vec_pretty(journal)
-        .map_err(|_| CoreError::Restore("无法序列化恢复日志".to_owned()))?;
-    atomic_replace_file(&data_directory.join(JOURNAL_FILE_NAME), &bytes)
+    atomic_replace_file(
+        &data_directory.join(JOURNAL_FILE_NAME),
+        &journal_bytes(journal)?,
+    )
+}
+
+fn journal_bytes(journal: &RestoreJournal) -> Result<Vec<u8>, CoreError> {
+    serde_json::to_vec_pretty(journal)
+        .map_err(|_| CoreError::Restore("无法序列化恢复日志".to_owned()))
 }
 
 fn summarize_connection(
@@ -1300,48 +1391,48 @@ fn failed_check(id: &str, label: &str, detail: &str) -> IntegrityCheck {
     }
 }
 
-fn sidecar(path: &Path, suffix: &str) -> PathBuf {
-    let mut value = path.as_os_str().to_os_string();
-    value.push(suffix);
-    PathBuf::from(value)
-}
-
-fn remove_sidecars(path: &Path) {
-    for suffix in ["-wal", "-shm"] {
-        let sidecar = sidecar(path, suffix);
-        if sidecar.exists() {
-            let _ = fs::remove_file(sidecar);
-        }
-    }
-}
-
 fn file_len(path: &Path) -> u64 {
     fs::metadata(path)
         .map(|metadata| metadata.len())
         .unwrap_or(0)
 }
 
-fn interrupted_name(directory: &Path) -> PathBuf {
+fn interrupted_name() -> String {
     let stamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or(0);
-    directory.join(format!("interrupted-{stamp}-xushu.db"))
+    format!("interrupted-{stamp}-xushu.db")
 }
 
 fn cleanup_owned_workspace(directory: &Path) {
-    if !directory.exists() {
+    let Some((parent, name)) = directory.parent().zip(directory.file_name()) else {
         return;
-    }
-    if secure_directory(directory).is_err() {
+    };
+    let Ok(parent) = secure_directory(parent) else {
         return;
+    };
+    if let Ok(directory) = parent.open_child(name) {
+        cleanup_workspace(&parent, name, directory);
     }
-    let _ = fs::remove_file(directory.join(PAYLOAD_FILE_NAME));
-    for suffix in ["-wal", "-shm"] {
-        let _ = fs::remove_file(sidecar(&directory.join(PAYLOAD_FILE_NAME), suffix));
+}
+
+fn cleanup_workspace(parent: &Directories, name: &std::ffi::OsStr, directory: Directories) {
+    for file in [
+        PAYLOAD_FILE_NAME,
+        "xushu.db-wal",
+        "xushu.db-shm",
+        MANIFEST_FILE_NAME,
+    ] {
+        let _ = directory.remove_file(file);
     }
-    let _ = fs::remove_file(directory.join(MANIFEST_FILE_NAME));
-    let _ = fs::remove_dir(directory);
+    if parent
+        .open_child(name)
+        .is_ok_and(|current| current.identity == directory.identity)
+    {
+        drop(directory);
+        let _ = parent.remove_child_dir(name);
+    }
 }
 
 #[cfg(test)]
@@ -1396,6 +1487,36 @@ mod tests {
         assert!(!owned.exists());
         assert!(!verify_owned.exists());
         assert!(unknown.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_boundaries_reject_redirected_workspaces_and_outside_rollback() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = tempfile::TempDir::new().unwrap();
+        let data = fixture.path().join("data");
+        let workspaces = data.join("restore-workspaces");
+        let rollback = data.join("restore-rollback");
+        let outside = fixture.path().join("outside");
+        fs::create_dir_all(&workspaces).unwrap();
+        fs::create_dir_all(&rollback).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join(PAYLOAD_FILE_NAME), b"keep").unwrap();
+        symlink(&outside, workspaces.join(Uuid::new_v4().to_string())).unwrap();
+        symlink(&outside, rollback.join("redirected")).unwrap();
+
+        cleanup_workspaces(&data).unwrap();
+        let guard = secure_directory(&data).unwrap();
+        assert!(matches!(
+            validate_rollback_directory(&guard, &outside),
+            Err(CoreError::UnsafePath)
+        ));
+        assert!(matches!(
+            validate_rollback_directory(&guard, &rollback.join("redirected")),
+            Err(CoreError::UnsafePath)
+        ));
+        assert_eq!(fs::read(outside.join(PAYLOAD_FILE_NAME)).unwrap(), b"keep");
     }
 
     #[test]

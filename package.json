@@ -1,6 +1,6 @@
 {
   "name": "xushu",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@12.16.1",
@@ -18,7 +18,8 @@
     "format:write": "prettier --write .",
     "tauri": "pnpm --filter @xushu/desktop tauri",
     "sidecar:prepare": "node scripts/prepare-sidecar.mjs",
-    "release:windows": "pnpm --filter @xushu/desktop tauri build --bundles nsis",
+    "release:macos": "pnpm --filter @xushu/desktop tauri build --ci --bundles dmg --target aarch64-apple-darwin -- --locked",
+    "release:windows": "pnpm --filter @xushu/desktop tauri build --ci --bundles nsis --target x86_64-pc-windows-msvc -- --locked",
     "rust:check": "cargo check --workspace --all-targets",
     "rust:fmt": "cargo fmt --all -- --check",
     "rust:clippy": "cargo clippy --workspace --all-targets -- -D warnings",

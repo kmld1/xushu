@@ -10,6 +10,8 @@ XUSHU 不替代 Claude Code、编辑器或终端，也不把 AI 的“已完成�
 
 ## 当前状态
 
+**v1.0.0 候选**支持构建 macOS ARM64 DMG 和 Windows x64 NSIS。双平台真机验收与发布状态以候选的验收记录为准。已发布版本与已知限制见 [CHANGELOG](CHANGELOG.md)。
+
 **Phase 7（Windows x64 0.1.1 正式候选）**。宿主构建与安装包载荷核验通过，状态为 `RELEASE_PREPARATION_COMPLETE`。Phase 7A.4 仍为 `VALIDATION_PENDING`，四项来宾及原始现场验收为 `DEFERRED_BY_USER`。
 
 **历史 Phase 7A（Windows 正式产品化、安装与生命周期）：Windows x64 Release、NSIS 安装包、`xushu-hook` sidecar、有界日志与隔离安装版 E2E PASS；生产 identifier 实机安装、代码签名、真实 Claude Code 会话与人工视觉 PENDING/NOT_RUN（2026-11-14）。** [Phase 7A 报告](docs/phases/PHASE_7A_REPORT.md) · [ADR-0010](docs/architecture/ADR/0010-windows-release-packaging.md)
@@ -147,19 +149,30 @@ pnpm tauri dev
 
 `xushu-hook.exe` 在开发模式下由 `cargo build -p xushu-hook` 生成；桌面程序从当前可执行文件同目录查找它。正式构建会由 `pnpm sidecar:prepare` 自动编译并按 Tauri `externalBin` 规则打包，安装后位于主程序同目录。
 
-## Windows 正式构建与安装（0.1.1 候选）
+## v1.0.0 构建与安装
+
+在对应的物理设备上，从同一个候选提交安装锁定依赖并构建。
+
+| 平台 | 构建命令 | 默认产物目录 |
+| --- | --- | --- |
+| macOS Apple Silicon | `pnpm release:macos` | `target/aarch64-apple-darwin/release/bundle/dmg/` |
+| Windows 11 x64 | `pnpm release:windows` | `target/x86_64-pc-windows-msvc/release/bundle/nsis/` |
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm release:windows
 ```
 
-使用默认 Cargo 输出目录时，产物路径如下。
+### macOS Apple Silicon
 
-```text
-target/release/xushu-desktop.exe
-target/release/bundle/nsis/XUSHU_0.1.1_x64-setup.exe
-```
+1. 将下载的 DMG 文件的 SHA-256（`shasum -a 256 <DMG路径>`）与发行校验清单比对。
+2. 打开 DMG，把 `XUSHU.app` 拖到 `/Applications`。已安装时，先退出旧版，并检查现有安装和数据的迁移状态。
+3. 从“应用程序”打开 XUSHU。包使用 Ad-hoc 签名，未经过 Apple 公证。下载文件可能受 Gatekeeper 或设备管理策略阻止。[Apple 安全打开 App 指南](https://support.apple.com/zh-cn/102445)
+
+数据目录为 `~/Library/Application Support/dev.xushu.desktop`。移除 App 会保留该目录以及外部 Git 项目。曾启用 Hooks 时，可在移除 App 前通过项目详情撤销接入。
+
+### Windows 11 x64
+
+先用 `Get-FileHash -Algorithm SHA256 <安装包路径>` 核对 NSIS 文件。打开经核验的安装包，按向导完成当前用户安装。未签名包可能触发 SmartScreen 或受 Smart App Control、组织策略阻止。[Microsoft SmartScreen 指南](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)
 
 - 安装器使用 Tauri 官方 NSIS，默认 **currentUser** 安装（无需管理员权限），默认目录 `%LOCALAPPDATA%\XUSHU`。
 - 安装包包含主程序与 `xushu-hook.exe`；应用启动时会执行固定的 `xushu-hook --version` 探测，sidecar 缺失、损坏或版本与主程序不一致时，Claude 接入状态显示“接收程序不可用”，不会静默使用不可信接收器。
@@ -167,7 +180,7 @@ target/release/bundle/nsis/XUSHU_0.1.1_x64-setup.exe
 - 升级安装保留用户数据与数据库迁移；升级后 sidecar 摘要或路径变化会显示需要重新安装 Hooks，不会自动修改项目配置。
 - 卸载默认保留用户数据库、备份、日志与项目目录。卸载向导中的“删除应用数据”复选框默认不勾选；静默卸载不会删除 `%APPDATA%` 数据。
 - 卸载不会删除各项目 `.claude/settings.local.json` 中的 XUSHU Hooks。请在卸载前先在应用内逐项目“卸载 Hooks”；若应用已卸载，需人工从项目设置中删除带 `--xushu-managed` 的条目（先备份该文件）。
-- 当前未配置 Windows 代码签名证书（`SIGNING_NOT_CONFIGURED`），安装包不是已签名发行版；未启用自动更新。
+- 当前未配置 Windows 代码签名证书（`SIGNING_NOT_CONFIGURED`）。双平台均采用手动升级。
 
 历史 Phase 7A 的隔离安装 E2E 可用以下命令运行。
 
@@ -175,7 +188,7 @@ target/release/bundle/nsis/XUSHU_0.1.1_x64-setup.exe
 python scripts/phase7a-e2e.py --installer "<0.1.0 隔离 NSIS 安装包>"
 ```
 
-该脚本只接受使用 `dev.xushu.e2e.phase7a` identifier 与隔离 `appDirectoriesOverride` 构建的测试安装包，使用独立数据目录，不打开或写入正常用户数据库。 `--installer` 使用 `0.1.0` 基线包，可选的 `--upgrade-installer` 使用 `0.1.1` 隔离升级包。
+该脚本只接受使用 `dev.xushu.e2e.phase7a` identifier 与隔离 `appDirectoriesOverride` 构建的测试安装包。`--installer` 默认验收 `0.1.0`，`--upgrade-installer` 默认验收 `0.1.1`。可通过 `--version 1.0.0` 指定候选，使用 `--skip-production-fingerprint` 避免读取正式数据库。
 
 ## 使用流程
 

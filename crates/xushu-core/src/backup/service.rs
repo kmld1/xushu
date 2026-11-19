@@ -10,6 +10,7 @@ use rusqlite::{params, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::claude::path_guard::Directories;
 use crate::db::{now_utc_rfc3339, Database};
 use crate::error::CoreError;
 
@@ -21,9 +22,11 @@ use super::manifest::{
     read_staged_manifest, verify_payload, BackupOrigin, MANIFEST_FILE_NAME, MAX_BACKUP_BYTES,
     PAYLOAD_FILE_NAME,
 };
+#[cfg(windows)]
+use super::paths::free_space_bytes;
 use super::paths::{
-    capacity_ok, copy_regular_file_bounded, display_path, free_space_bytes, prepare_directory,
-    secure_directory, sha256_file, write_new_file,
+    capacity_ok, copy_regular_file_bounded, display_path, map_path_error, prepare_directory,
+    remove_known_files, secure_directory, sha256_file, write_new_file,
 };
 
 const REGISTRY_LIMIT: i64 = 200;
@@ -335,11 +338,11 @@ impl<'a> BackupService<'a> {
         ));
 
         let workspace_root = self.data_directory.join("verify-workspaces");
-        let workspace = prepare_directory(&workspace_root)?
-            .canonical
-            .join(Uuid::new_v4().to_string());
-        fs::create_dir(&workspace).map_err(CoreError::Io)?;
-        let workspace_guard = secure_directory(&workspace)?;
+        let root = prepare_directory(&workspace_root)?;
+        let name = Uuid::new_v4().to_string();
+        root.create_child(&name).map_err(map_path_error)?;
+        let workspace_guard = root.open_child(&name).map_err(map_path_error)?;
+        let workspace = workspace_guard.canonical.clone();
         let copy_path = workspace.join(PAYLOAD_FILE_NAME);
 
         let copy_result = copy_regular_file_bounded(
@@ -426,8 +429,7 @@ impl<'a> BackupService<'a> {
             }
         }
 
-        drop(workspace_guard);
-        cleanup_owned_directory(&workspace);
+        let _ = cleanup_owned_directory(&root, &name, workspace_guard, TRANSIENT_FILES);
 
         let verified_at = if verified {
             Some(now_utc_rfc3339())
@@ -475,6 +477,9 @@ impl<'a> BackupService<'a> {
                 "备份目录不存在，未删除历史登记".to_owned(),
             ));
         }
+        let parent = secure_directory(directory.parent().ok_or(CoreError::UnsafePath)?)?;
+        let name = directory.file_name().ok_or(CoreError::UnsafePath)?;
+        let guard = parent.open_child(name).map_err(map_path_error)?;
         let manifest_read = read_manifest(&directory)?;
         if manifest_read.manifest.backup_id != record.backup_id {
             return Err(CoreError::Conflict(
@@ -483,28 +488,18 @@ impl<'a> BackupService<'a> {
         }
         verify_payload(&directory, &manifest_read.manifest)?;
 
-        let owns_only_known_files = {
-            let guard = secure_directory(&directory)?;
-            let entries = fs::read_dir(&directory).map_err(CoreError::Io)?;
-            let mut only_known = true;
-            for entry in entries {
-                let entry = entry.map_err(CoreError::Io)?;
-                let name = entry.file_name().to_string_lossy().to_string();
-                if !TRANSIENT_FILES.contains(&name.as_str()) {
-                    only_known = false;
-                }
-            }
-            drop(guard);
-            only_known
-        };
-        if !owns_only_known_files {
+        if !owns_only_known_files(&guard)? {
             return Err(CoreError::Conflict(
                 "备份目录包含非备份文件，已拒绝删除；请手动检查该目录".to_owned(),
             ));
         }
 
-        super::paths::remove_known_files(&directory, &[MANIFEST_FILE_NAME, PAYLOAD_FILE_NAME])?;
-        fs::remove_dir(&directory).map_err(CoreError::Io)?;
+        cleanup_owned_directory(
+            &parent,
+            name,
+            guard,
+            &[MANIFEST_FILE_NAME, PAYLOAD_FILE_NAME],
+        )?;
         self.database.with_transaction(|transaction| {
             transaction.execute(
                 "DELETE FROM backup_records WHERE backup_id = ?1",
@@ -735,7 +730,7 @@ impl<'a> BackupService<'a> {
             now.format("%Y%m%dT%H%M%SZ"),
             &backup_id[..8]
         );
-        let final_directory = target.join(directory_name);
+        let final_directory = target.join(&directory_name);
         if final_directory.exists() {
             return Err(CoreError::Conflict("备份目标目录已存在同名备份".to_owned()));
         }
@@ -748,18 +743,32 @@ impl<'a> BackupService<'a> {
             ));
         }
         let required = estimate.saturating_add(BACKUP_SPACE_MARGIN);
-        if !capacity_ok(required, free_space_bytes(&target)) {
+        #[cfg(unix)]
+        let available = target_guard.free_space_bytes();
+        #[cfg(windows)]
+        let available = free_space_bytes(&target);
+        if available.is_none() {
+            return Err(CoreError::Backup("无法确认目标磁盘的可用空间".to_owned()));
+        }
+        if !capacity_ok(required, available) {
             return Err(CoreError::Backup(format!(
                 "目标磁盘可用空间不足：至少需要 {} MiB",
                 required.div_ceil(1024 * 1024)
             )));
         }
 
-        cleanup_stale_partials(&target);
+        cleanup_stale_partials(&target_guard);
 
-        let partial = target.join(format!(".partial-{backup_id}"));
-        fs::create_dir(&partial).map_err(CoreError::Io)?;
-        let mut partial_guard = Some(secure_directory(&partial)?);
+        let partial_name = format!(".partial-{backup_id}");
+        let partial = target.join(&partial_name);
+        target_guard
+            .create_child(&partial_name)
+            .map_err(map_path_error)?;
+        let mut partial_guard = Some(
+            target_guard
+                .open_child(&partial_name)
+                .map_err(map_path_error)?,
+        );
         let payload_path = partial.join(PAYLOAD_FILE_NAME);
 
         let result = (|| -> Result<BackupRecord, CoreError> {
@@ -780,7 +789,8 @@ impl<'a> BackupService<'a> {
                     ));
                 }
             }
-            remove_transient_sidecars(&payload_path);
+            let staged = partial_guard.as_ref().ok_or(CoreError::UnsafePath)?;
+            remove_known_files(staged, &["xushu.db-wal", "xushu.db-shm"])?;
 
             let (payload_sha256, payload_size) = sha256_file(&payload_path, MAX_BACKUP_BYTES)?;
             if payload_size == 0 {
@@ -811,15 +821,27 @@ impl<'a> BackupService<'a> {
                 return Err(CoreError::BackupCancelled);
             }
 
+            let staged = target_guard
+                .open_child(&partial_name)
+                .map_err(map_path_error)?;
+            if partial_guard
+                .as_ref()
+                .is_none_or(|guard| guard.identity != staged.identity)
+            {
+                return Err(CoreError::UnsafePath);
+            }
+            let identity = staged.identity.clone();
+            drop(staged);
             partial_guard.take();
-            fs::rename(&partial, &final_directory).map_err(CoreError::Io)?;
-            let final_guard = match secure_directory(&final_directory) {
-                Ok(guard) => guard,
-                Err(error) => {
-                    cleanup_owned_directory(&final_directory);
-                    return Err(error);
-                }
-            };
+            target_guard
+                .rename_file(&partial_name, &directory_name)
+                .map_err(map_path_error)?;
+            let final_guard = target_guard
+                .open_child(&directory_name)
+                .map_err(map_path_error)?;
+            if final_guard.identity != identity {
+                return Err(CoreError::UnsafePath);
+            }
 
             let record = BackupRecord {
                 id: Uuid::new_v4().to_string(),
@@ -842,8 +864,12 @@ impl<'a> BackupService<'a> {
             };
 
             if let Err(error) = self.insert_record(&record) {
-                drop(final_guard);
-                cleanup_owned_directory(&final_directory);
+                let _ = cleanup_owned_directory(
+                    &target_guard,
+                    &directory_name,
+                    final_guard,
+                    TRANSIENT_FILES,
+                );
                 return Err(error);
             }
             drop(final_guard);
@@ -851,9 +877,11 @@ impl<'a> BackupService<'a> {
         })();
 
         // 目录句柄在 Windows 上会阻止删除目录；失败清理前必须先释放。
-        drop(partial_guard);
-        if result.is_err() && partial.exists() {
-            cleanup_owned_directory(&partial);
+        if result.is_err() {
+            if let Some(guard) = partial_guard {
+                let _ =
+                    cleanup_owned_directory(&target_guard, &partial_name, guard, TRANSIENT_FILES);
+            }
         }
         result
     }
@@ -934,50 +962,58 @@ fn file_len(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-fn remove_transient_sidecars(payload: &Path) {
-    for suffix in ["-wal", "-shm"] {
-        let path = sidecar(payload, suffix);
-        if path.exists() {
-            let _ = fs::remove_file(path);
-        }
-    }
-}
-
-fn cleanup_stale_partials(target: &Path) {
-    let Ok(entries) = fs::read_dir(target) else {
+fn cleanup_stale_partials(target: &Directories) {
+    let Ok(entries) = target.names() else {
         return;
     };
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if !name.starts_with(".partial-") || !entry.path().is_dir() {
+    for name in entries.flatten() {
+        if !name
+            .to_str()
+            .is_some_and(|name| name.starts_with(".partial-"))
+        {
             continue;
         }
-        let stale = entry
-            .metadata()
+        let Ok(directory) = target.open_child(&name) else {
+            continue;
+        };
+        let stale = directory
+            .modified()
             .ok()
-            .and_then(|metadata| metadata.modified().ok())
             .and_then(|modified| SystemTime::now().duration_since(modified).ok())
             .is_some_and(|age| age >= STALE_PARTIAL_AGE);
         if !stale {
             continue;
         }
-        let only_known = fs::read_dir(entry.path())
-            .map(|entries| {
-                entries.flatten().all(|child| {
-                    let name = child.file_name().to_string_lossy().into_owned();
-                    TRANSIENT_FILES.contains(&name.as_str())
-                })
-            })
-            .unwrap_or(false);
-        if only_known {
-            cleanup_owned_directory(&entry.path());
+        if owns_only_known_files(&directory).unwrap_or(false) {
+            let _ = cleanup_owned_directory(target, &name, directory, TRANSIENT_FILES);
         }
     }
 }
 
-fn cleanup_owned_directory(directory: &Path) {
-    let _ = super::paths::remove_known_files(directory, TRANSIENT_FILES);
-    let _ = fs::remove_dir(directory);
+fn owns_only_known_files(directory: &Directories) -> Result<bool, CoreError> {
+    for name in directory.names()? {
+        if !name?
+            .to_str()
+            .is_some_and(|name| TRANSIENT_FILES.contains(&name))
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn cleanup_owned_directory(
+    parent: &Directories,
+    name: impl AsRef<std::ffi::OsStr>,
+    directory: Directories,
+    files: &[&str],
+) -> Result<(), CoreError> {
+    if parent.open_child(&name).map_err(map_path_error)?.identity != directory.identity {
+        return Err(CoreError::UnsafePath);
+    }
+    remove_known_files(&directory, files)?;
+    drop(directory);
+    parent.remove_child_dir(name).map_err(map_path_error)
 }
 
 fn directory_exists(path: &Path) -> bool {

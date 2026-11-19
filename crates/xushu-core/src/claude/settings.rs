@@ -1,4 +1,4 @@
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -10,7 +10,7 @@ use xushu_hook_protocol::HookEventType;
 
 use crate::error::CoreError;
 
-use super::path_guard::{identity, redirected, regular_file_options, Directories};
+use super::path_guard::{identity, Directories, FileAccess};
 
 pub(crate) const SETTINGS_DIR_NAME: &str = ".claude";
 pub(crate) const SETTINGS_FILE_NAME: &str = "settings.local.json";
@@ -83,9 +83,7 @@ pub(crate) struct SettingsSnapshot {
     authorized_root: PathBuf,
     pub project_root: PathBuf,
     pub root_identity: Option<String>,
-    pub settings_dir: PathBuf,
     settings_dir_identity: Option<String>,
-    pub settings_path: PathBuf,
     settings_identity: Option<String>,
     pub exists: bool,
     pub raw: Option<Vec<u8>>,
@@ -97,13 +95,10 @@ pub(crate) struct SettingsSnapshot {
 
 impl SettingsSnapshot {
     fn project_unavailable(project_root: &Path) -> Self {
-        let settings_dir = project_root.join(SETTINGS_DIR_NAME);
         Self {
             authorized_root: project_root.to_path_buf(),
             project_root: project_root.to_path_buf(),
             root_identity: None,
-            settings_path: settings_dir.join(SETTINGS_FILE_NAME),
-            settings_dir,
             settings_dir_identity: None,
             settings_identity: None,
             exists: false,
@@ -155,15 +150,11 @@ pub(crate) fn read_snapshot(project_root: &Path, project_id: &str) -> SettingsSn
                 .with_error(path_error(&error, SettingsError::ProjectUnavailable));
         }
     };
-    let settings_dir = project_root.join(SETTINGS_DIR_NAME);
-    let settings_path = settings_dir.join(SETTINGS_FILE_NAME);
     let mut snapshot = SettingsSnapshot {
         authorized_root: project_root.to_owned(),
         project_root: root.canonical.clone(),
         root_identity: Some(root.identity.clone()),
-        settings_dir,
         settings_dir_identity: None,
-        settings_path,
         settings_identity: None,
         exists: false,
         raw: None,
@@ -173,13 +164,13 @@ pub(crate) fn read_snapshot(project_root: &Path, project_id: &str) -> SettingsSn
         other_group_count: 0,
     };
 
-    let directory = match Directories::open(&snapshot.settings_dir) {
+    let directory = match root.open_child(SETTINGS_DIR_NAME) {
         Ok(directory) => directory,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return snapshot,
         Err(error) => return snapshot.with_error(path_error(&error, SettingsError::ReadFailed)),
     };
     snapshot.settings_dir_identity = Some(directory.identity.clone());
-    let file = match open_settings(&snapshot.settings_path) {
+    let file = match directory.open_file(SETTINGS_FILE_NAME, FileAccess::Read) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return snapshot,
         Err(error) => return snapshot.with_error(path_error(&error, SettingsError::ReadFailed)),
@@ -223,19 +214,6 @@ fn path_error(error: &io::Error, missing: SettingsError) -> SettingsError {
         io::ErrorKind::InvalidInput | io::ErrorKind::NotADirectory => SettingsError::UnsafePath,
         _ => SettingsError::ReadFailed,
     }
-}
-
-fn open_settings(path: &Path) -> io::Result<File> {
-    let metadata = fs::symlink_metadata(path)?;
-    if redirected(&metadata) || !metadata.is_file() {
-        return Err(super::path_guard::unsafe_path());
-    }
-    let file = regular_file_options().read(true).open(path)?;
-    let metadata = file.metadata()?;
-    if redirected(&metadata) || !metadata.is_file() {
-        return Err(super::path_guard::unsafe_path());
-    }
-    Ok(file)
 }
 
 fn analyze_document(
@@ -503,35 +481,10 @@ pub(crate) fn lock_mutation(
     backup_dir: &Path,
     project_id: &str,
 ) -> Result<MutationLock, CoreError> {
-    let _parent = Directories::open(backup_dir)
+    let parent = Directories::open(backup_dir)
         .map_err(|_| CoreError::Claude("无法确认 Hook 设置备份目录，已拒绝修改".to_owned()))?;
-    let directory = backup_dir.join(project_id);
-    let directory_guard = ensure_directory(&directory)?;
-    let path = directory.join(".settings.lock");
-    if fs::symlink_metadata(&path).is_ok_and(|metadata| redirected(&metadata)) {
-        return Err(CoreError::Claude(
-            SettingsError::UnsafePath.message().to_owned(),
-        ));
-    }
-    let mut options = regular_file_options();
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
-        options.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE);
-    }
-    let lock = options
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(path)?;
-    let metadata = lock.metadata()?;
-    if redirected(&metadata) || !metadata.is_file() {
-        return Err(CoreError::Claude(
-            SettingsError::UnsafePath.message().to_owned(),
-        ));
-    }
+    let directory_guard = ensure_directory(&parent, project_id)?;
+    let lock = directory_guard.open_file(".settings.lock", FileAccess::Lock)?;
     match lock.try_lock() {
         Ok(()) => Ok(MutationLock {
             _file: lock,
@@ -563,12 +516,12 @@ pub(crate) fn write_document(
         ));
     }
 
-    let _root = pin_root(snapshot)?;
+    let root = pin_root(snapshot)?;
     if snapshot.settings_dir_identity.is_none() {
         // An external creator winning this race invalidates the preview.
-        fs::create_dir(&snapshot.settings_dir)?;
+        root.create_child(SETTINGS_DIR_NAME)?;
     }
-    let directory = pin_settings_dir(snapshot, snapshot.settings_dir_identity.as_deref())?;
+    let directory = pin_settings_dir(&root, snapshot.settings_dir_identity.as_deref())?;
     let check = || {
         check_current(
             snapshot,
@@ -582,7 +535,7 @@ pub(crate) fn write_document(
     if let Some(raw) = &snapshot.raw {
         backup_settings(backup_dir, project_id, raw)?;
     }
-    let identity = write_atomic(&snapshot.settings_path, &serialized, check)?;
+    let identity = write_atomic(&directory, &serialized, check)?;
     Ok(WrittenSettings {
         bytes: serialized,
         identity,
@@ -595,8 +548,8 @@ pub(crate) fn restore_settings(
     written: &WrittenSettings,
     project_id: &str,
 ) -> Result<(), CoreError> {
-    let _root = pin_root(snapshot)?;
-    let directory = pin_settings_dir(snapshot, Some(&written.directory.identity))?;
+    let root = pin_root(snapshot)?;
+    let directory = pin_settings_dir(&root, Some(&written.directory.identity))?;
     let check = || {
         check_current(
             snapshot,
@@ -611,10 +564,10 @@ pub(crate) fn restore_settings(
             .raw
             .as_ref()
             .ok_or_else(|| CoreError::Claude("备份内存不可用，无法恢复设置文件".to_owned()))?;
-        write_atomic(&snapshot.settings_path, raw, check)?;
+        write_atomic(&directory, raw, check)?;
     } else {
         check()?;
-        fs::remove_file(&snapshot.settings_path)?;
+        directory.remove_file(SETTINGS_FILE_NAME)?;
     }
     Ok(())
 }
@@ -630,11 +583,9 @@ pub(super) fn pin_root(snapshot: &SettingsSnapshot) -> Result<Directories, CoreE
     Ok(root)
 }
 
-fn pin_settings_dir(
-    snapshot: &SettingsSnapshot,
-    expected: Option<&str>,
-) -> Result<Directories, CoreError> {
-    let directory = Directories::open(&snapshot.settings_dir)
+fn pin_settings_dir(root: &Directories, expected: Option<&str>) -> Result<Directories, CoreError> {
+    let directory = root
+        .open_child(SETTINGS_DIR_NAME)
         .map_err(|_| CoreError::Claude(SettingsError::UnsafePath.message().to_owned()))?;
     if expected.is_some_and(|expected| expected != directory.identity) {
         return Err(CoreError::Claude(
@@ -666,46 +617,33 @@ fn check_current(
 }
 
 fn write_atomic(
-    path: &Path,
+    directory: &Directories,
     bytes: &[u8],
     check: impl FnOnce() -> Result<(), CoreError>,
 ) -> Result<String, CoreError> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| CoreError::Claude("设置文件路径无效".to_owned()))?;
-    let temporary = parent.join(format!(".settings.local.json.xushu-{}.tmp", Uuid::new_v4()));
-    let mut file = regular_file_options()
-        .write(true)
-        .create_new(true)
-        .open(&temporary)?;
+    let temporary = format!(".settings.local.json.xushu-{}.tmp", Uuid::new_v4());
+    let mut file = directory.open_file(&temporary, FileAccess::CreateNew)?;
     let result = (|| {
         file.write_all(bytes)?;
         file.sync_all()?;
         let identity = identity(&file)?;
         drop(file);
         check()?;
-        fs::rename(&temporary, path)?;
+        directory.rename_file(&temporary, SETTINGS_FILE_NAME)?;
         Ok(identity)
     })();
     if result.is_err() {
-        let _ = fs::remove_file(&temporary);
+        let _ = directory.remove_file(&temporary);
     }
     result
 }
 
 fn backup_settings(backup_dir: &Path, project_id: &str, raw: &[u8]) -> Result<(), CoreError> {
-    let _parent = Directories::open(backup_dir)?;
-    let directory = backup_dir.join(project_id);
-    let _directory = ensure_directory(&directory)?;
+    let parent = Directories::open(backup_dir)?;
+    let directory = ensure_directory(&parent, project_id)?;
     let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ");
-    let path = directory.join(format!(
-        "settings.local.json-{timestamp}-{}.bak",
-        Uuid::new_v4()
-    ));
-    let mut file = regular_file_options()
-        .write(true)
-        .create_new(true)
-        .open(&path)?;
+    let name = format!("settings.local.json-{timestamp}-{}.bak", Uuid::new_v4());
+    let mut file = directory.open_file(&name, FileAccess::CreateNew)?;
     file.write_all(raw)?;
     file.sync_all()?;
     drop(file);
@@ -713,37 +651,35 @@ fn backup_settings(backup_dir: &Path, project_id: &str, raw: &[u8]) -> Result<()
     Ok(())
 }
 
-fn prune_backups(directory: &Path) {
-    let Ok(entries) = fs::read_dir(directory) else {
+fn prune_backups(directory: &Directories) {
+    let Ok(entries) = directory.names() else {
         return;
     };
-    let mut backups: Vec<PathBuf> = entries
+    let mut backups: Vec<_> = entries
         .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| {
-                    name.starts_with("settings.local.json-") && name.ends_with(".bak")
-                })
+        .filter(|name| {
+            name.to_str().is_some_and(|name| {
+                name.starts_with("settings.local.json-") && name.ends_with(".bak")
+            })
         })
         .collect();
     backups.sort();
     if backups.len() <= BACKUP_KEEP {
         return;
     }
-    for path in &backups[..backups.len() - BACKUP_KEEP] {
-        let _ = fs::remove_file(path);
+    for name in &backups[..backups.len() - BACKUP_KEEP] {
+        let _ = directory.remove_file(name);
     }
 }
 
-fn ensure_directory(path: &Path) -> Result<Directories, CoreError> {
-    match fs::create_dir(path) {
+fn ensure_directory(parent: &Directories, name: &str) -> Result<Directories, CoreError> {
+    match parent.create_child(name) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(error.into()),
     }
-    Directories::open(path)
+    parent
+        .open_child(name)
         .map_err(|_| CoreError::Claude(SettingsError::UnsafePath.message().to_owned()))
 }
 
@@ -772,6 +708,7 @@ fn to_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn rollback_preserves_settings_changed_after_our_write() {
@@ -781,9 +718,38 @@ mod tests {
         let original = read_snapshot(root.path(), project_id);
         let written = write_document(&original, &json!({}), &backup, project_id).unwrap();
         let external_edit = br#"{"permissions":{"deny":["Read"]}}"#;
-        fs::write(&original.settings_path, external_edit).unwrap();
+        let path = root.path().join(SETTINGS_DIR_NAME).join(SETTINGS_FILE_NAME);
+        fs::write(&path, external_edit).unwrap();
 
         assert!(restore_settings(&original, &written, project_id).is_err());
-        assert_eq!(fs::read(&original.settings_path).unwrap(), external_edit);
+        assert_eq!(fs::read(path).unwrap(), external_edit);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn redirected_settings_directory_cannot_receive_rollback() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = tempfile::TempDir::new().unwrap();
+        let root = fixture.path().join("project");
+        let outside = fixture.path().join("outside");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&outside).unwrap();
+        let project_id = "11111111-1111-4111-8111-111111111111";
+        let original = read_snapshot(&root, project_id);
+        let written = write_document(&original, &json!({}), &outside, project_id).unwrap();
+        let redirected = outside.join(SETTINGS_FILE_NAME);
+        fs::write(&redirected, &written.bytes).unwrap();
+        let directory = root.join(SETTINGS_DIR_NAME);
+        fs::rename(&directory, root.join("moved")).unwrap();
+        symlink(&outside, &directory).unwrap();
+
+        assert!(matches!(
+            read_snapshot(&root, project_id).error,
+            Some(SettingsError::UnsafePath)
+        ));
+        assert!(restore_settings(&original, &written, project_id).is_err());
+        assert_eq!(fs::read(redirected).unwrap(), written.bytes);
+        assert!(root.join("moved").join(SETTINGS_FILE_NAME).is_file());
     }
 }

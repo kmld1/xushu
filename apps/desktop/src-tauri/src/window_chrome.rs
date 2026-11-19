@@ -315,7 +315,9 @@ mod platform {
 #[cfg(windows)]
 pub use platform::install;
 
+#[cfg(windows)]
 const TITLEBAR_HEIGHT: u32 = 44;
+#[cfg(windows)]
 const BUTTON_WIDTH: u32 = 46;
 
 #[cfg(not(windows))]
