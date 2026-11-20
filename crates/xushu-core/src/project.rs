@@ -52,12 +52,17 @@ impl<'a> ProjectRepository<'a> {
             .map_err(Into::into)
     }
 
-    pub(crate) fn find_by_root_key(&self, key: &str) -> Result<Option<Project>, CoreError> {
+    pub(crate) fn find_by_root(&self, root_path: &str) -> Result<Option<Project>, CoreError> {
         self.connection
             .query_row(
                 "SELECT id, name, root_path, created_at, updated_at, archived_at
-                 FROM projects WHERE root_path_key = ?1",
-                [key],
+                 FROM projects
+                 WHERE root_path_key = ?1 OR (root_path_key = ?2 AND root_path = ?3)",
+                params![
+                    root_path_key(root_path),
+                    legacy_root_path_key(root_path),
+                    root_path,
+                ],
                 row_to_project,
             )
             .optional()
@@ -148,11 +153,9 @@ impl<'a> ProjectService<'a> {
             Some(name) => required_text(&name, "项目名称", PROJECT_NAME_MAX, false)?,
             None => default_project_name(&root_path)?,
         };
-        let key = root_path_key(&root_path);
-
         self.database.with_transaction(|transaction| {
             let repository = ProjectRepository::new(transaction);
-            if let Some(existing) = repository.find_by_root_key(&key)? {
+            if let Some(existing) = repository.find_by_root(&root_path)? {
                 let suffix = if existing.archived_at.is_some() {
                     "（已归档，可恢复）"
                 } else {
@@ -295,6 +298,14 @@ fn default_project_name(root_path: &str) -> Result<String, CoreError> {
 }
 
 fn root_path_key(root_path: &str) -> String {
+    // git::inspect returns canonical Unix roots and native Windows drive or UNC paths.
+    if root_path.starts_with('/') {
+        return root_path.to_owned();
+    }
+    legacy_root_path_key(root_path)
+}
+
+fn legacy_root_path_key(root_path: &str) -> String {
     root_path.replace('/', "\\").to_lowercase()
 }
 
@@ -305,4 +316,63 @@ fn map_project_write_error(error: rusqlite::Error) -> CoreError {
         }
     }
     CoreError::Database(error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unix_project_roots_preserve_case_and_respect_legacy_keys() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = Database::open(directory.path().join("xushu.db")).unwrap();
+        let connection = database.lock().unwrap();
+        let repository = ProjectRepository::new(&connection);
+        let legacy = Project {
+            id: Uuid::new_v4().to_string(),
+            name: "Legacy".to_owned(),
+            root_path: "/projects/Example".to_owned(),
+            created_at: now_utc_rfc3339(),
+            updated_at: now_utc_rfc3339(),
+            archived_at: None,
+        };
+        connection
+            .execute(
+                "INSERT INTO projects (id, name, root_path, root_path_key, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    legacy.id,
+                    legacy.name,
+                    legacy.root_path,
+                    "\\projects\\example",
+                    legacy.created_at,
+                    legacy.updated_at,
+                ],
+            )
+            .unwrap();
+
+        let other = Project {
+            id: Uuid::new_v4().to_string(),
+            name: "Other".to_owned(),
+            root_path: "/projects/example".to_owned(),
+            ..legacy.clone()
+        };
+        assert_eq!(
+            repository.find_by_root(&legacy.root_path).unwrap(),
+            Some(legacy.clone())
+        );
+        assert!(repository.find_by_root(&other.root_path).unwrap().is_none());
+        repository
+            .insert(&other)
+            .expect("distinct canonical Unix root must coexist with legacy root");
+        assert_eq!(
+            repository.find_by_root(&other.root_path).unwrap(),
+            Some(other)
+        );
+        assert_eq!(
+            repository.find_by_root(&legacy.root_path).unwrap(),
+            Some(legacy)
+        );
+        assert_eq!(repository.list(false).unwrap().len(), 2);
+    }
 }
