@@ -119,8 +119,7 @@ pub(crate) fn run_git_raw(
 ) -> Result<GitRawOutput, CoreError> {
     let mut command = Command::new("git");
     command
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .args(["-c", "core.fsmonitor=false", "-C"])
+        .args(["--no-optional-locks", "-c", "core.fsmonitor=false", "-C"])
         .arg(path)
         .args(args);
     let result = execute_command(command, timeout, max_bytes, &RunControl::new());

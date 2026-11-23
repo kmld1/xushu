@@ -600,6 +600,149 @@ fn unix_runner_cleans_up_descendants_with_inherited_pipes() {
     }
 }
 
+#[cfg(windows)]
+#[test]
+fn windows_job_reaps_the_tree_and_closes_both_pipes_before_reporting() {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use std::process::{Command, Stdio};
+    use std::time::Instant;
+    use windows_sys::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+    };
+
+    let fixture = TempDir::new().unwrap();
+    let script = fixture.path().join("tree.cjs");
+    fs::write(
+        &script,
+        r#"
+const fs = require('node:fs');
+const { spawn } = require('node:child_process');
+const [role, ready, exitSignal, code, ...ancestors] = process.argv.slice(2);
+if (role === 'leaf') {
+  console.log('leaf stdout');
+  console.error('leaf stderr');
+  fs.writeFileSync(ready + '.pids', [...ancestors, process.pid].join('\n'));
+  fs.writeFileSync(ready, 'ready');
+} else {
+  spawn(process.execPath, [__filename, role === 'root' ? 'child' : 'leaf',
+    ready, exitSignal, code, ...ancestors, process.pid], { stdio: 'inherit' })
+    .on('error', error => { console.error(error); process.exit(98); });
+  if (role === 'root' && code !== '-') {
+    setInterval(() => {
+      if (fs.existsSync(exitSignal)) process.exit(Number(code));
+    }, 10);
+  }
+}
+setTimeout(() => process.exit(99), 15000);
+"#,
+    )
+    .unwrap();
+
+    // Hold a real process handle so the assertion cannot follow a reused PID.
+    let mut unrelated = Command::new("node")
+        .args(["-e", "setTimeout(() => {}, 20000)"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    for (index, (expected, root_code)) in [
+        (runner::ExecutionStatus::Completed, "0"),
+        (runner::ExecutionStatus::Completed, "37"),
+        (runner::ExecutionStatus::Cancelled, "-"),
+        (runner::ExecutionStatus::TimedOut, "-"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let ready = fixture.path().join(format!("ready-{index}"));
+        let exit_signal = fixture.path().join(format!("exit-{index}"));
+        let plan = runner::RunPlan {
+            executable: "node".into(),
+            args: [
+                script.to_str().unwrap(),
+                "root",
+                ready.to_str().unwrap(),
+                exit_signal.to_str().unwrap(),
+                root_code,
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+            cwd: fixture.path().to_owned(),
+            timeout: Duration::from_secs(if expected == runner::ExecutionStatus::TimedOut {
+                4
+            } else {
+                10
+            }),
+            output_limit_bytes: 4096,
+        };
+        let control = RunControl::new();
+        let worker_control = control.clone();
+        let worker = thread::spawn(move || runner::execute(&plan, &worker_control));
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !ready.is_file() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let pids = match fs::read_to_string(ready.with_extension("pids")) {
+            Ok(pids) => pids,
+            Err(error) => {
+                control.cancel();
+                panic!(
+                    "scenario {index} did not start its grandchild: {error}; {:?}",
+                    worker.join().unwrap()
+                );
+            }
+        };
+        let handles: Vec<_> = pids
+            .lines()
+            .map(|pid| {
+                let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid.parse().unwrap()) };
+                assert!(
+                    !handle.is_null(),
+                    "fixture PID {pid}: {}",
+                    std::io::Error::last_os_error()
+                );
+                let handle = unsafe { OwnedHandle::from_raw_handle(handle) };
+                assert_eq!(
+                    unsafe { WaitForSingleObject(handle.as_raw_handle(), 0) },
+                    WAIT_TIMEOUT
+                );
+                handle
+            })
+            .collect();
+        assert_eq!(handles.len(), 3);
+
+        if expected == runner::ExecutionStatus::Cancelled {
+            control.cancel();
+        } else if expected == runner::ExecutionStatus::Completed {
+            fs::write(&exit_signal, "exit").unwrap();
+        }
+        let result = worker.join().unwrap();
+        assert_eq!(result.execution_status, expected, "{result:?}");
+        if let Ok(code) = root_code.parse::<i32>() {
+            assert_eq!(result.exit_code, Some(code));
+        }
+        assert!(result.stdout.contains("leaf stdout"), "{result:?}");
+        assert!(result.stderr.contains("leaf stderr"), "{result:?}");
+        assert!(
+            !result.stdout_truncated && !result.stderr_truncated,
+            "{result:?}"
+        );
+        for handle in handles {
+            assert_eq!(
+                unsafe { WaitForSingleObject(handle.as_raw_handle(), 0) },
+                WAIT_OBJECT_0
+            );
+        }
+        assert!(
+            unrelated.try_wait().unwrap().is_none(),
+            "unrelated process was stopped"
+        );
+    }
+    unrelated.kill().unwrap();
+    unrelated.wait().unwrap();
+}
+
 #[test]
 fn output_limit_truncates_but_drains_pipe() {
     let (_repo_directory, repo) = init_repo();

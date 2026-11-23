@@ -1,12 +1,17 @@
 use std::io::{self, Read};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
-#[cfg(windows)]
-use std::sync::atomic::AtomicU32;
+use std::process::Command;
+#[cfg(unix)]
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(unix)]
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
+
+#[cfg(windows)]
+mod win;
 
 /// 一次验证运行计划。程序与参数保持分离，不经过 Shell。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,17 +75,11 @@ impl<T: Default> RunOutcome<T> {
     }
 }
 
-/// 运行控制句柄：取消标志与本次运行的进程组或 Job。
+/// 运行控制句柄。Windows runner 在自己的线程中持有 Job 并轮询取消标志。
 pub struct RunControl {
     cancelled: AtomicBool,
     #[cfg(unix)]
     group: Mutex<Option<rustix::process::Pid>>,
-    #[cfg(windows)]
-    child_pid: AtomicU32,
-    #[cfg(windows)]
-    job_assigned: AtomicBool,
-    #[cfg(windows)]
-    job: Mutex<Option<win::JobHandle>>,
 }
 
 impl RunControl {
@@ -89,76 +88,17 @@ impl RunControl {
             cancelled: AtomicBool::new(false),
             #[cfg(unix)]
             group: Mutex::new(None),
-            #[cfg(windows)]
-            child_pid: AtomicU32::new(0),
-            #[cfg(windows)]
-            job_assigned: AtomicBool::new(false),
-            #[cfg(windows)]
-            job: Mutex::new(None),
         })
     }
 
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
+        #[cfg(unix)]
         self.terminate_tree();
     }
 
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
-    }
-
-    #[cfg(windows)]
-    fn attach_job(&self, job: win::JobHandle) {
-        let already_cancelled = self.is_cancelled();
-        if let Ok(mut guard) = self.job.lock() {
-            if already_cancelled {
-                win::terminate(&job);
-            } else {
-                *guard = Some(job);
-            }
-        }
-    }
-
-    #[cfg(windows)]
-    fn assign_process(&self, pid: u32) -> bool {
-        self.child_pid.store(pid, Ordering::SeqCst);
-        let guard = match self.job.lock() {
-            Ok(guard) => guard,
-            Err(_) => return false,
-        };
-        match guard.as_ref() {
-            Some(job) => {
-                let assigned = win::assign(job, pid);
-                if assigned {
-                    self.job_assigned.store(true, Ordering::SeqCst);
-                }
-                if self.is_cancelled() {
-                    win::terminate(job);
-                    if !assigned {
-                        win::kill_tree_fallback(pid);
-                    }
-                }
-                assigned
-            }
-            None => false,
-        }
-    }
-
-    #[cfg(windows)]
-    fn terminate_tree(&self) {
-        if let Ok(guard) = self.job.lock() {
-            if let Some(job) = guard.as_ref() {
-                win::terminate(job);
-            }
-        }
-        // Job Object 已接管进程树时由 TerminateJobObject 清理；只有 Job 分配
-        // 失败或未分配时才回退到 taskkill，避免对已退出 PID 做多余操作。
-        if !self.job_assigned.load(Ordering::SeqCst) {
-            let pid = self.child_pid.load(Ordering::SeqCst);
-            if pid != 0 {
-                win::kill_tree_fallback(pid);
-            }
-        }
     }
 
     #[cfg(unix)]
@@ -198,19 +138,6 @@ impl RunControl {
             result => result,
         }
     }
-
-    #[cfg(windows)]
-    fn release_job(&self) {
-        if let Ok(mut guard) = self.job.lock() {
-            self.child_pid.store(0, Ordering::SeqCst);
-            let job = guard.take();
-            drop(guard);
-            drop(job);
-        }
-    }
-
-    #[cfg(not(windows))]
-    fn release_job(&self) {}
 }
 
 #[cfg(unix)]
@@ -235,11 +162,6 @@ fn has_exited(child: &mut std::process::Child) -> io::Result<bool> {
     }
 }
 
-#[cfg(windows)]
-fn has_exited(child: &mut std::process::Child) -> io::Result<bool> {
-    child.try_wait().map(|status| status.is_some())
-}
-
 /// 执行验证计划，清理本次运行的进程组或 Job，并有界地排空输出。
 pub fn execute(plan: &RunPlan, control: &Arc<RunControl>) -> RunOutcome {
     let mut command = Command::new(&plan.executable);
@@ -260,7 +182,7 @@ pub fn execute(plan: &RunPlan, control: &Arc<RunControl>) -> RunOutcome {
 }
 
 pub(crate) fn execute_command(
-    mut command: Command,
+    command: Command,
     timeout: Duration,
     output_limit_bytes: usize,
     control: &RunControl,
@@ -283,40 +205,24 @@ pub(crate) fn execute_command(
         return cancelled_before_spawn();
     }
 
-    #[cfg(windows)]
-    let job = win::create_job();
-    #[cfg(windows)]
-    if let Some(job) = job {
-        control.attach_job(job);
-    }
-
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-
     let started = Instant::now();
     #[cfg(unix)]
-    let spawned = control.spawn_group(&mut command);
+    let spawned = {
+        use std::os::unix::process::CommandExt;
+        let mut command = command;
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .process_group(0);
+        control.spawn_group(&mut command)
+    };
     #[cfg(windows)]
-    let spawned = command.spawn();
+    let spawned = win::JobChild::spawn(&command);
     let mut child = match spawned {
         Ok(child) => child,
         Err(error) => {
-            control.release_job();
+            #[cfg(unix)]
             if control.is_cancelled() {
                 return cancelled_before_spawn();
             }
@@ -334,11 +240,6 @@ pub(crate) fn execute_command(
             };
         }
     };
-
-    #[cfg(windows)]
-    {
-        let _ = control.assign_process(child.id());
-    }
 
     let stdout_pipe = child.stdout.take();
     let stderr_pipe = child.stderr.take();
@@ -367,7 +268,11 @@ pub(crate) fn execute_command(
             note = Some(format!("验证运行超过 {} 秒上限", timeout.as_secs()));
             break;
         }
-        match has_exited(&mut child) {
+        #[cfg(unix)]
+        let exited = has_exited(&mut child);
+        #[cfg(windows)]
+        let exited = child.has_exited();
+        match exited {
             Ok(true) => break,
             Ok(false) => thread::sleep(Duration::from_millis(20)),
             Err(error) => {
@@ -379,27 +284,29 @@ pub(crate) fn execute_command(
     }
 
     #[cfg(unix)]
-    if let Err(error) = control.finish_group(execution_status == ExecutionStatus::Completed) {
-        execution_status = ExecutionStatus::Interrupted;
-        note = Some(format!("无法清理验证进程组: {error}"));
-    }
+    let cleanup = {
+        if let Err(error) = control.finish_group(execution_status == ExecutionStatus::Completed) {
+            execution_status = ExecutionStatus::Interrupted;
+            note = Some(format!("无法清理验证进程组: {error}"));
+        }
+        if execution_status != ExecutionStatus::Completed {
+            let _ = child.kill();
+        }
+        child.wait().map(|status| status.code())
+    };
     #[cfg(windows)]
-    control.terminate_tree();
-    if execution_status != ExecutionStatus::Completed {
-        let _ = child.kill();
-    }
+    let cleanup = child.finish();
 
-    let exit_code = match child.wait() {
-        Ok(status) => status.code(),
+    let exit_code = match cleanup {
+        Ok(code) => code,
         Err(error) => {
             execution_status = ExecutionStatus::Interrupted;
-            note = Some(format!("无法回收验证进程: {error}"));
+            note = Some(format!("无法确认验证进程清理完成: {error}"));
             None
         }
     };
 
-    #[cfg(windows)]
-    control.release_job();
+    drop(child);
     stop_capture.store(true, Ordering::Release);
 
     let stdout = stdout_handle
@@ -409,7 +316,10 @@ pub(crate) fn execute_command(
         .and_then(|handle| handle.join().ok())
         .unwrap_or_default();
 
-    if execution_status == ExecutionStatus::Completed && (!stdout.eof || !stderr.eof) {
+    if (!stdout.eof || !stderr.eof)
+        && (execution_status == ExecutionStatus::Completed
+            || cfg!(windows) && execution_status != ExecutionStatus::Interrupted)
+    {
         execution_status = ExecutionStatus::Interrupted;
         note = Some("验证输出管道未完整关闭".to_owned());
     }
@@ -448,6 +358,10 @@ fn read_limited(
     let mut output = CapturedOutput::default();
     let mut buffer = [0_u8; 16 * 1024];
     let mut drain_started = None;
+    #[cfg(windows)]
+    let drain_limit = Duration::from_millis(750);
+    #[cfg(unix)]
+    let drain_limit = Duration::from_millis(150);
 
     #[cfg(unix)]
     {
@@ -461,8 +375,7 @@ fn read_limited(
     }
     loop {
         if stop.load(Ordering::Acquire)
-            && drain_started.get_or_insert_with(Instant::now).elapsed()
-                >= Duration::from_millis(150)
+            && drain_started.get_or_insert_with(Instant::now).elapsed() >= drain_limit
         {
             break;
         }
@@ -522,94 +435,4 @@ fn read_pipe(pipe: &mut (impl Read + PipeHandle), buffer: &mut [u8]) -> io::Resu
     }
     let length = buffer.len().min(available as usize);
     pipe.read(&mut buffer[..length])
-}
-
-#[cfg(windows)]
-mod win {
-    use std::path::PathBuf;
-    use std::process::{Command, Stdio};
-
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    };
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
-    };
-
-    pub struct JobHandle(HANDLE);
-
-    unsafe impl Send for JobHandle {}
-    unsafe impl Sync for JobHandle {}
-
-    impl Drop for JobHandle {
-        fn drop(&mut self) {
-            unsafe {
-                CloseHandle(self.0);
-            }
-        }
-    }
-
-    pub fn create_job() -> Option<JobHandle> {
-        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-        if handle.is_null() {
-            return None;
-        }
-
-        let job = JobHandle(handle);
-        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-
-        let configured = unsafe {
-            SetInformationJobObject(
-                job.0,
-                JobObjectExtendedLimitInformation,
-                &info as *const _ as *const std::ffi::c_void,
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )
-        };
-
-        if configured == 0 {
-            None
-        } else {
-            Some(job)
-        }
-    }
-
-    pub fn assign(job: &JobHandle, pid: u32) -> bool {
-        let process = unsafe { OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid) };
-        if process.is_null() {
-            return false;
-        }
-        let assigned = unsafe { AssignProcessToJobObject(job.0, process) } != 0;
-        unsafe {
-            CloseHandle(process);
-        }
-        assigned
-    }
-
-    pub fn terminate(job: &JobHandle) {
-        unsafe {
-            TerminateJobObject(job.0, 1);
-        }
-    }
-
-    /// Job Object 分配失败时的有界兜底：按 PID 树终止。
-    ///
-    /// 固定从 `%SystemRoot%\System32\taskkill.exe` 启动，避免 PATH 劫持。
-    pub fn kill_tree_fallback(pid: u32) {
-        let taskkill = std::env::var_os("SystemRoot")
-            .map(|root| PathBuf::from(root).join("System32").join("taskkill.exe"))
-            .filter(|path| path.is_file())
-            .unwrap_or_else(|| PathBuf::from("taskkill"));
-
-        let _ = Command::new(taskkill)
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
 }
