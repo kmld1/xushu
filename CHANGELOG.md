@@ -2,6 +2,8 @@
 
 ## 1.0.0 候选
 
+- 将 `url` 更新至 2.5.9，修复 URL 源计算可能导致进程终止的问题。 [RustSec RUSTSEC-2026-0592](https://rustsec.org/advisories/RUSTSEC-2026-0592.html)
+- 将 `cookie` 更新至 0.18.3，修复受影响应用中加密 Cookie 随机数可能重复的问题。 [RustSec RUSTSEC-2026-0594](https://rustsec.org/advisories/RUSTSEC-2026-0594.html)
 - 增加 Apple Silicon 原生 App 和 DMG 构建。Windows 继续提供 x64 NSIS 当前用户安装包。
 - macOS 的系统交通灯、项目切换和主题控件合并到同一条工作带，使用系统窗口圆角和阴影。Windows 继续使用原有自定义标题栏和 Snap Layouts。
 - macOS 验收执行器在正常结束、取消和超时时清理进程组，回收输出管道。Git 状态采集使用相同的超时与输出限制。
