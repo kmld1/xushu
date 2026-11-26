@@ -23,8 +23,7 @@ pub use overview::{
     HooksPrivacyOverview, RestoreOperationSummary, RetentionSummary,
 };
 pub use paths::lock_data_directory;
-#[cfg(unix)]
-pub(crate) use paths::{open_checked_sqlite, SqliteAccess};
+pub(crate) use paths::{open_checked_sqlite, CheckedSqlite, SqliteAccess};
 pub use restore::{
     cleanup_workspaces, recover_interrupted_restore, PerformRestoreInput, RestoreDataChange,
     RestoreDataSummary, RestoreHooksReview, RestoreJournal, RestoreOutcome, RestorePlan,

@@ -971,6 +971,47 @@ fn working_tree_change_makes_evidence_stale() {
 }
 
 #[test]
+fn changing_only_staged_content_makes_evidence_stale() {
+    let (_repo_directory, repo) = init_repo();
+    let (_database_directory, database) = temp_database();
+    let (task, criterion_id) = create_auto_task(&database, &repo);
+    save_spec(
+        &database,
+        &task.id,
+        &criterion_id,
+        "git",
+        &["--version"],
+        None,
+        30,
+        4096,
+    )
+    .unwrap();
+
+    let file = repo.join("README.md");
+    fs::write(&file, "first staged revision\n").unwrap();
+    run_git(&repo, &["add", "README.md"]);
+    fs::write(&file, "same working copy\n").unwrap();
+    let before = run_git(&repo, &["status", "--porcelain"]);
+    assert_eq!(before, "MM README.md");
+    run_approved(&database, &task.id, &criterion_id);
+    assert_eq!(
+        detail_with_status(&database, &task.id),
+        VerificationResult::Pass
+    );
+
+    fs::write(&file, "second staged revision\n").unwrap();
+    run_git(&repo, &["add", "README.md"]);
+    fs::write(&file, "same working copy\n").unwrap();
+    assert_eq!(run_git(&repo, &["status", "--porcelain"]), before);
+
+    assert_eq!(
+        detail_with_status(&database, &task.id),
+        VerificationResult::Stale
+    );
+    assert!(transition(&database, &task.id, "done", None).is_err());
+}
+
+#[test]
 fn git_head_change_makes_evidence_stale() {
     let (_repo_directory, repo) = init_repo();
     let (_database_directory, database) = temp_database();

@@ -16,12 +16,7 @@ pub(crate) const COPY_BUFFER_BYTES: usize = 64 * 1024;
 
 /// Keep one desktop process in charge of database startup and file switching.
 pub fn lock_data_directory(path: &Path) -> Result<File, CoreError> {
-    #[cfg(unix)]
-    let directory = Directories::open_sqlite_parent(path, true).map_err(map_path_error)?;
-    #[cfg(windows)]
-    std::fs::create_dir_all(path)?;
-    #[cfg(windows)]
-    let directory = secure_directory(path)?;
+    let directory = private_data_directory(path, true)?;
     let file = directory
         .open_file("xushu.db.lock", FileAccess::Lock)
         .map_err(map_path_error)?;
@@ -40,14 +35,7 @@ pub(crate) fn secure_directory(path: &Path) -> Result<Directories, CoreError> {
 }
 
 pub(super) fn private_data_directory(path: &Path, create: bool) -> Result<Directories, CoreError> {
-    #[cfg(unix)]
-    return Directories::open_sqlite_parent(path, create).map_err(map_path_error);
-    #[cfg(windows)]
-    if create {
-        prepare_directory(path)
-    } else {
-        secure_directory(path)
-    }
+    Directories::open_sqlite_parent(path, create).map_err(map_path_error)
 }
 
 /// 校验或创建用户选择的备份目标目录。
@@ -110,7 +98,6 @@ fn open_file(path: &Path, access: FileAccess) -> Result<File, CoreError> {
         .map_err(map_path_error)
 }
 
-#[cfg(unix)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SqliteAccess {
     Existing,
@@ -119,11 +106,37 @@ pub(crate) enum SqliteAccess {
 }
 
 #[cfg(unix)]
+pub(crate) type CheckedSqlite = rusqlite::Connection;
+
+#[cfg(windows)]
+pub(crate) struct CheckedSqlite {
+    // Close SQLite before releasing the handles that pin its path.
+    connection: rusqlite::Connection,
+    _main: File,
+    _parent: Directories,
+}
+
+#[cfg(windows)]
+impl std::ops::Deref for CheckedSqlite {
+    type Target = rusqlite::Connection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.connection
+    }
+}
+
+#[cfg(windows)]
+impl std::ops::DerefMut for CheckedSqlite {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.connection
+    }
+}
+
 pub(crate) fn open_checked_sqlite(
     path: &Path,
     flags: rusqlite::OpenFlags,
     access: SqliteAccess,
-) -> Result<rusqlite::Connection, CoreError> {
+) -> Result<CheckedSqlite, CoreError> {
     use rusqlite::{Connection, OpenFlags};
 
     let absolute;
@@ -134,8 +147,7 @@ pub(crate) fn open_checked_sqlite(
         &absolute
     };
     let parent_path = path.parent().ok_or(CoreError::UnsafePath)?;
-    let parent = Directories::open_sqlite_parent(parent_path, access == SqliteAccess::OpenOrCreate)
-        .map_err(map_path_error)?;
+    let parent = private_data_directory(parent_path, access == SqliteAccess::OpenOrCreate)?;
     let name = path.file_name().ok_or(CoreError::UnsafePath)?;
     let check_auxiliary = |directory: &Directories| -> Result<bool, CoreError> {
         let mut present = false;
@@ -184,13 +196,23 @@ pub(crate) fn open_checked_sqlite(
     if existing.is_some_and(|identity| identity != expected) {
         return Err(CoreError::UnsafePath);
     }
+    #[cfg(windows)]
+    let main = {
+        let file = parent
+            .open_sqlite_file(name)
+            .map_err(map_path_error)?
+            .ok_or(CoreError::UnsafePath)?;
+        if crate::claude::path_guard::identity(&file).map_err(map_path_error)? != expected {
+            return Err(CoreError::UnsafePath);
+        }
+        file
+    };
     let connection = Connection::open_with_flags(
         parent.canonical.join(name),
         flags.difference(OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_URI)
             | OpenFlags::SQLITE_OPEN_NOFOLLOW,
     )?;
-    let after =
-        Directories::open_sqlite_parent(&parent.canonical, false).map_err(map_path_error)?;
+    let after = private_data_directory(&parent.canonical, false)?;
     if after.identity != parent.identity
         || after
             .sqlite_file_identity(name)
@@ -201,6 +223,13 @@ pub(crate) fn open_checked_sqlite(
         return Err(CoreError::UnsafePath);
     }
     check_auxiliary(&after)?;
+    #[cfg(windows)]
+    return Ok(CheckedSqlite {
+        connection,
+        _main: main,
+        _parent: parent,
+    });
+    #[cfg(unix)]
     Ok(connection)
 }
 

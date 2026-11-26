@@ -34,6 +34,30 @@ fn temp_database() -> (TempDir, Database) {
     (directory, database)
 }
 
+#[cfg(unix)]
+#[test]
+fn creating_a_backup_preserves_unrelated_partial_directories_in_the_export_target() {
+    use std::fs::{File, FileTimes};
+    use std::time::SystemTime;
+
+    let (data, database) = temp_database();
+    let target = TempDir::new().unwrap();
+    let unrelated = target.path().join(".partial-unrelated");
+    fs::create_dir(&unrelated).unwrap();
+    let file = unrelated.join("xushu.db");
+    fs::write(&file, b"unrelated data").unwrap();
+    File::open(&unrelated)
+        .unwrap()
+        .set_times(FileTimes::new().set_modified(SystemTime::UNIX_EPOCH))
+        .unwrap();
+
+    BackupService::new(&database, data.path())
+        .create_manual(target.path().to_str().unwrap(), &AtomicBool::new(false))
+        .unwrap();
+
+    assert_eq!(fs::read(&file).unwrap(), b"unrelated data");
+}
+
 fn run_git(path: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .arg("-C")
@@ -874,6 +898,33 @@ fn preflight_reports_missing_project_roots_and_hook_review_from_backup() {
 }
 
 #[test]
+fn deletion_preserves_a_replaced_payload_and_its_registry_entry() {
+    let (data, database) = temp_database();
+    let target = data.path().join("backups");
+    let service = BackupService::new(&database, data.path());
+    let record = service
+        .create_manual(target.to_str().unwrap(), &AtomicBool::new(false))
+        .unwrap();
+    let payload = Path::new(&record.directory_path).join("xushu.db");
+    let replacement = b"a different file in the export directory";
+    fs::write(&payload, replacement).unwrap();
+    rewrite_manifest(&record, |manifest| {
+        manifest["files"][0]["size"] = Value::from(replacement.len() as u64);
+        manifest["files"][0]["sha256"] = Value::from(format!("{:x}", Sha256::digest(replacement)));
+    });
+
+    assert!(matches!(
+        service.delete(&record.backup_id, true),
+        Err(CoreError::Conflict(_))
+    ));
+    assert_eq!(fs::read(payload).unwrap(), replacement);
+    assert_eq!(
+        service.get(&record.backup_id).unwrap().payload_sha256,
+        record.payload_sha256
+    );
+}
+
+#[test]
 fn policy_cleanup_removes_only_registered_automatic_backups() {
     let (_repo_root, repo) = init_repo();
     let (directory, database) = temp_database();
@@ -1432,6 +1483,11 @@ fn junction_backup_target_is_refused_when_environment_allows_creation() {
         .create_manual(&nested.to_string_lossy(), &AtomicBool::new(false))
         .expect_err("junction ancestor must be refused");
     assert!(matches!(ancestor, CoreError::UnsafePath));
+    assert!(matches!(
+        Database::open(nested.join("new-data").join("xushu.db")),
+        Err(CoreError::UnsafePath)
+    ));
+    assert!(!real.join("child").join("new-data").exists());
     assert!(!directory.path().join("restore-journal.json").exists());
 }
 

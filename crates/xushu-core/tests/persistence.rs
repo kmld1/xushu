@@ -408,7 +408,6 @@ fn database_rejects_linked_main_and_companion_files() {
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn database_refuses_to_create_over_orphaned_companions() {
     use std::fs;
@@ -423,7 +422,6 @@ fn database_refuses_to_create_over_orphaned_companions() {
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn database_rejects_hard_linked_main_and_companion_files() {
     use std::fs;
@@ -443,6 +441,31 @@ fn database_rejects_hard_linked_main_and_companion_files() {
         assert!(matches!(Database::open(&path), Err(CoreError::UnsafePath)));
         assert_eq!(fs::read(&protected).unwrap(), b"untouched");
     }
+}
+
+#[cfg(windows)]
+#[test]
+fn database_holds_its_parent_path_until_the_connection_closes() {
+    use std::fs;
+
+    let fixture = TempDir::new().unwrap();
+    let parent = fixture.path().join("parent");
+    let moved = fixture.path().join("moved");
+    let path = parent.join("data").join("xushu.db");
+    let database = Database::open(&path).unwrap();
+
+    assert!(fs::rename(&parent, &moved).is_err());
+    assert!(database.health().unwrap().ok);
+    drop(database);
+
+    fs::rename(parent, &moved).unwrap();
+    assert!(
+        Database::open(moved.join("data").join("xushu.db"))
+            .unwrap()
+            .health()
+            .unwrap()
+            .ok
+    );
 }
 
 #[cfg(target_os = "macos")]

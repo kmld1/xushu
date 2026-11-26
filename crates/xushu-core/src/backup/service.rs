@@ -20,8 +20,8 @@ use super::integrity::{
 };
 use super::manifest::{
     build_manifest, isolated_failure_detail, manifest_bytes, open_isolated_payload, parse_manifest,
-    read_manifest_in, verify_payload_in, BackupOrigin, MANIFEST_FILE_NAME, MAX_BACKUP_BYTES,
-    MAX_MANIFEST_BYTES, PAYLOAD_FILE_NAME,
+    read_manifest_in, verify_payload_in, BackupManifest, BackupOrigin, MANIFEST_FILE_NAME,
+    MAX_BACKUP_BYTES, MAX_MANIFEST_BYTES, PAYLOAD_FILE_NAME,
 };
 #[cfg(windows)]
 use super::paths::free_space_bytes;
@@ -92,6 +92,17 @@ pub struct BackupRecord {
     pub last_error: Option<String>,
     pub directory_exists: bool,
     pub manifest_exists: bool,
+}
+
+impl BackupRecord {
+    fn matches_manifest(&self, manifest: &BackupManifest) -> bool {
+        manifest.backup_id == self.backup_id
+            && manifest.schema_version == self.schema_version
+            && manifest
+                .payload()
+                .sha256
+                .eq_ignore_ascii_case(&self.payload_sha256)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -295,12 +306,7 @@ impl<'a> BackupService<'a> {
         checks.push(pass_check("manifest", "备份清单格式", "格式与字段通过校验"));
 
         let manifest = &manifest_read.manifest;
-        let registry_matches = manifest.backup_id == record.backup_id
-            && manifest
-                .payload()
-                .sha256
-                .eq_ignore_ascii_case(&record.payload_sha256)
-            && manifest.schema_version == record.schema_version;
+        let registry_matches = record.matches_manifest(manifest);
         checks.push(if registry_matches {
             pass_check("registry", "本地登记", "清单与本地登记一致")
         } else {
@@ -495,7 +501,7 @@ impl<'a> BackupService<'a> {
         let name = directory.file_name().ok_or(CoreError::UnsafePath)?;
         let guard = parent.open_child(name).map_err(map_path_error)?;
         let manifest_read = read_manifest_in(&guard)?;
-        if manifest_read.manifest.backup_id != record.backup_id {
+        if !record.matches_manifest(&manifest_read.manifest) {
             return Err(CoreError::Conflict(
                 "备份清单与登记不一致，已拒绝删除".to_owned(),
             ));
@@ -779,8 +785,6 @@ impl<'a> BackupService<'a> {
                 required.div_ceil(1024 * 1024)
             )));
         }
-
-        cleanup_stale_partials(&target_guard);
 
         let partial_name = format!(".partial-{backup_id}");
         target_guard

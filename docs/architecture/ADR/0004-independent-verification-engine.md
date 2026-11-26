@@ -77,8 +77,8 @@ Phase 2 的完成门禁在 Rust 侧强制执行，但自动验收条件永远不
 
 - `start_verification` 只做校验、写入 `running` 运行记录并启动后台线程，立即返回；
 - 子进程在后台线程执行，不持有数据库锁；
-- Windows 使用 Job Object（`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`）绑定子进程树；取消/超时调用 `TerminateJobObject`，应用退出时句柄关闭也会终止整棵树；若 Job 分配失败，取消/超时时回退到 `taskkill /PID <pid> /T /F`；
-- 非 Windows 平台首版使用主进程 `kill`，并明确标注未做进程组验证；
+- Windows 使用 Job Object（`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`）绑定子进程树。启动前确认子进程属于该 Job，确认失败即停止启动。取消和超时调用 `TerminateJobObject`，应用退出时关闭 Job 句柄；
+- Unix 为每次验收创建独立进程组，在正常完成、取消和超时后清理留在该组内的进程。应用正常退出时向在途验收发出取消请求；
 - 输出由独立线程读取，按配置上限截断并继续排空管道，避免死锁与无界内存；
 - 取消通过共享 `RunControl` 标志与 Job 句柄完成；取消命令不直接信任前端状态。
 
@@ -88,6 +88,7 @@ Phase 2 的完成门禁在 Rust 侧强制执行，但自动验收条件永远不
 
 - Git HEAD、分支、detached、unborn、dirty；
 - 工作区内容指纹：对 `git status --porcelain=v1 -z --untracked-files=all` 列出的变更/未跟踪文件，在项目根目录内读取字节计算 SHA-256，连同路径与状态排序后汇总；
+- 存在已暂存变更时，纳入 `git diff --cached --raw -z --no-abbrev` 给出的对象 ID 与文件模式。获取失败或输出被截断时，指纹标记为不完整；
 - 指纹完整性标记；超过文件数/总字节/单文件上限时标记不完整；
 - 运行开始与结束各采集一次，两者必须一致。
 
@@ -104,7 +105,7 @@ Phase 2 的完成门禁在 Rust 侧强制执行，但自动验收条件永远不
 - 无法可靠采集当前代码状态时返回 `INCONCLUSIVE`；
 - 均不能作为完成证据。
 
-不为了实现失效判断修改用户 Git 仓库；只读执行 `rev-parse`、`symbolic-ref`、`status`。
+失效判断只读执行 `rev-parse`、`symbolic-ref`、`status` 和 `diff --cached`。
 
 ### 7. 完成门禁
 

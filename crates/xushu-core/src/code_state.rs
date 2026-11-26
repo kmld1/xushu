@@ -1,5 +1,3 @@
-#[cfg(windows)]
-use std::fs;
 use std::fs::File;
 use std::io;
 use std::io::Read;
@@ -9,7 +7,6 @@ use std::time::Duration;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-#[cfg(unix)]
 use crate::claude::path_guard::{Directories, FileAccess};
 use crate::error::CoreError;
 use crate::git::run_git_raw;
@@ -160,6 +157,37 @@ pub fn capture(root: &Path) -> Result<CodeState, CoreError> {
         hash_field(&mut hasher, &content);
     }
 
+    if entries
+        .iter()
+        .any(|entry| !matches!(entry.status.as_bytes().first(), Some(b' ' | b'?')))
+    {
+        // The worktree can remain byte-for-byte identical while the staged
+        // blob changes. Include object IDs and file modes from the index diff.
+        let staged = run_git_raw(
+            &root,
+            &[
+                "diff",
+                "--cached",
+                "--raw",
+                "-z",
+                "--no-abbrev",
+                "--no-renames",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--ignore-submodules=none",
+            ],
+            GIT_STATUS_TIMEOUT,
+            GIT_STATUS_LIMIT,
+        )?;
+        if !staged.success || staged.stdout_truncated {
+            complete = false;
+            notes.push("无法完整采集 Git 暂存区状态".to_owned());
+        }
+        hash_field(&mut hasher, "git-index-diff");
+        hasher.update((staged.stdout.len() as u64).to_le_bytes());
+        hasher.update(staged.stdout);
+    }
+
     let fingerprint = format!("sha256:{}", hex(&hasher.finalize()));
     let unborn = head.is_none();
     let detached = branch.is_none() && head.is_some();
@@ -286,7 +314,6 @@ enum FingerprintInput {
     Link(PathBuf),
 }
 
-#[cfg(unix)]
 fn fingerprint_input(path: &Path) -> io::Result<FingerprintInput> {
     let parent = path.parent().ok_or(io::ErrorKind::InvalidInput)?;
     let name = path.file_name().ok_or(io::ErrorKind::InvalidInput)?;
@@ -301,21 +328,6 @@ fn fingerprint_input(path: &Path) -> io::Result<FingerprintInput> {
             .map(FingerprintInput::Link)
             .map_err(|_| error),
         Err(error) => Err(error),
-    }
-}
-
-#[cfg(windows)]
-fn fingerprint_input(path: &Path) -> io::Result<FingerprintInput> {
-    let kind = fs::symlink_metadata(path)?.file_type();
-    if kind.is_symlink() {
-        fs::read_link(path).map(FingerprintInput::Link)
-    } else if kind.is_file() {
-        File::open(path).map(FingerprintInput::File)
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "不支持的工作区文件类型",
-        ))
     }
 }
 

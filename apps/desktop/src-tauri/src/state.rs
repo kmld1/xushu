@@ -192,13 +192,18 @@ impl AppState {
                     database: Arc::new(Mutex::new(None)),
                     startup_error: Some(match pending_manual {
                         Some(notice) => ApiError::new("RESTORE_NEEDS_MANUAL", &notice.message),
-                        None if matches!(&error, CoreError::Conflict(_)) => {
+                        None if data_lock.is_none() && matches!(&error, CoreError::Conflict(_)) => {
                             ApiError::new("DATABASE_IN_USE", "另一个序枢进程正在使用此数据库")
                         }
-                        None => ApiError::new(
-                            "DATABASE_UNAVAILABLE",
-                            "本地数据库初始化失败，请检查应用数据目录权限后重启应用",
-                        ),
+                        None => match &error {
+                            CoreError::Conflict(message) => {
+                                ApiError::new("DATABASE_UNAVAILABLE", message)
+                            }
+                            _ => ApiError::new(
+                                "DATABASE_UNAVAILABLE",
+                                "本地数据库初始化失败，请检查应用数据目录权限后重启应用",
+                            ),
+                        },
                     }),
                     controls: Arc::new(Mutex::new(HashMap::new())),
                     shutting_down: Arc::new(AtomicBool::new(false)),
@@ -1004,6 +1009,23 @@ mod tests {
                 .unwrap()
                 .ok
         );
+    }
+
+    #[test]
+    fn startup_reports_orphaned_sqlite_files_without_creating_a_database() {
+        let directory = TempDir::new().unwrap();
+        let wal = directory.path().join("xushu.db-wal");
+        fs::write(&wal, b"orphaned WAL").unwrap();
+
+        let state = AppState::initialize(directory.path());
+        let error = state
+            .with_database(|database| database.health())
+            .unwrap_err();
+
+        assert_eq!(error.code, "DATABASE_UNAVAILABLE");
+        assert!(error.message.contains("数据库主文件缺失"));
+        assert!(!directory.path().join("xushu.db").exists());
+        assert_eq!(fs::read(wal).unwrap(), b"orphaned WAL");
     }
 
     #[test]

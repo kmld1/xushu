@@ -30,6 +30,28 @@ pub(crate) enum FileAccess {
 impl Directories {
     #[cfg(windows)]
     pub fn open(path: &Path) -> io::Result<Self> {
+        Self::open_windows(path, false)
+    }
+
+    #[cfg(windows)]
+    pub fn open_sqlite_parent(path: &Path, create: bool) -> io::Result<Self> {
+        use std::path::Prefix;
+
+        if !matches!(path.components().next(), Some(Component::Prefix(prefix))
+            if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_)))
+        {
+            return Err(unsafe_path());
+        }
+        for part in path.components() {
+            if let Component::Normal(name) = part {
+                checked_name(name)?;
+            }
+        }
+        Self::open_windows(path, create)
+    }
+
+    #[cfg(windows)]
+    fn open_windows(path: &Path, create: bool) -> io::Result<Self> {
         if !path.is_absolute() || path.components().any(|part| part == Component::ParentDir) {
             return Err(unsafe_path());
         }
@@ -39,7 +61,17 @@ impl Directories {
             if directory.parent().is_none() && !directory.has_root() {
                 continue;
             }
-            let file = open_directory(directory)?;
+            let file = match open_directory(directory) {
+                Err(error) if create && error.kind() == io::ErrorKind::NotFound => {
+                    match fs::create_dir(directory) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                        Err(error) => return Err(error),
+                    }
+                    open_directory(directory)?
+                }
+                result => result?,
+            };
             let metadata = file.metadata()?;
             if redirected(&metadata) || !metadata.is_dir() {
                 return Err(unsafe_path());
@@ -167,6 +199,47 @@ impl Directories {
         }
     }
 
+    #[cfg(windows)]
+    pub fn sqlite_file_identity(&self, name: impl AsRef<OsStr>) -> io::Result<Option<String>> {
+        self.open_sqlite_file(name)?
+            .as_ref()
+            .map(identity)
+            .transpose()
+    }
+
+    #[cfg(windows)]
+    pub fn open_sqlite_file(&self, name: impl AsRef<OsStr>) -> io::Result<Option<File>> {
+        use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_FLAG_OPEN_REPARSE_POINT,
+            FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        };
+
+        let name = checked_name(name.as_ref())?;
+        let file = match fs::OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(self.canonical.join(name))
+        {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            result => result?,
+        };
+        let metadata = file.metadata()?;
+        if redirected(&metadata) || !metadata.is_file() {
+            return Err(unsafe_path());
+        }
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        // SAFETY: the file handle is live and info is writable for the call.
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if info.nNumberOfLinks != 1 {
+            return Err(unsafe_path());
+        }
+        Ok(Some(file))
+    }
+
     #[cfg(unix)]
     fn from_unix(fd: std::os::fd::OwnedFd, canonical: PathBuf) -> io::Result<Self> {
         let handle = File::from(fd);
@@ -266,12 +339,18 @@ impl Directories {
         }
     }
 
-    #[cfg(unix)]
     pub fn read_link(&self, name: impl AsRef<OsStr>) -> io::Result<PathBuf> {
-        use std::os::unix::ffi::OsStrExt;
         let name = checked_name(name.as_ref())?;
-        let target = unix::readlinkat(&self.handle, name, Vec::new()).map_err(unix_path_error)?;
-        Ok(PathBuf::from(OsStr::from_bytes(target.as_bytes())))
+        #[cfg(windows)]
+        return fs::read_link(self.canonical.join(name));
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+
+            let target =
+                unix::readlinkat(&self.handle, name, Vec::new()).map_err(unix_path_error)?;
+            Ok(PathBuf::from(OsStr::from_bytes(target.as_bytes())))
+        }
     }
 
     pub fn rename_file(&self, from: impl AsRef<OsStr>, to: impl AsRef<OsStr>) -> io::Result<()> {
@@ -386,6 +465,13 @@ impl Directories {
 }
 
 fn checked_name(name: &OsStr) -> io::Result<&OsStr> {
+    #[cfg(windows)]
+    {
+        let bytes = name.as_encoded_bytes();
+        if bytes.contains(&b':') || matches!(bytes.last(), Some(b'.' | b' ')) {
+            return Err(unsafe_path());
+        }
+    }
     let mut parts = Path::new(name).components();
     match (parts.next(), parts.next()) {
         (Some(Component::Normal(component)), None) if component == name => Ok(component),

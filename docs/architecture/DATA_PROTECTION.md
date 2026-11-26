@@ -222,7 +222,7 @@ preflight（只读）
 - 恢复后的 Hooks 自动复核：只显示提示，不自动安装/停用/卸载。
 - 屏幕阅读器、真实用户剪贴板、生产安装包 sidecar、macOS/Linux 未验证。
 - 人工视觉仍为 `VISUAL_REVIEW_PENDING`；未自动截图。
-- SQLite 主库与伴随文件仍使用路径式 VFS。应用数据目录的祖先归属、权限、ACL 与卷检查覆盖打开时点；同 UID 进程、root/管理员进程在连接存续期替换目录项的残余风险未关闭。完整结论见 `target/v1.0.0-security-closure-20261126/MACOS_SECURITY_RECEIPT.md`。
+- SQLite 主库与伴随文件仍使用路径式 VFS。macOS 的祖先归属、权限、ACL 与卷检查覆盖打开时点。同 UID 进程或管理员仍可能在连接存续期修改有写权限的目录项。详见 [ADR-0009](ADR/0009-backup-restore-data-protection.md) 的 SQLite 路径约束。
 
 ## 10. API 核对依据
 

@@ -1,7 +1,5 @@
 mod migrations;
 
-#[cfg(windows)]
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
@@ -12,6 +10,7 @@ use rusqlite::backup::{Backup, StepResult};
 use rusqlite::{config::DbConfig, Connection, OpenFlags};
 use serde::Serialize;
 
+use crate::backup::{open_checked_sqlite, CheckedSqlite, SqliteAccess};
 use crate::error::CoreError;
 
 pub use migrations::{run_migrations, Migration, MigrationReport, MIGRATIONS};
@@ -21,7 +20,7 @@ pub use migrations::{run_migrations, Migration, MigrationReport, MIGRATIONS};
 /// 连接由 `Mutex` 串行化，避免把非 `Sync` 的 `rusqlite::Connection` 直接暴露给
 /// 多线程运行时。数据库文件路径只在 Rust 内部使用，不通过 IPC 返回。
 pub struct Database {
-    conn: Mutex<Connection>,
+    conn: Mutex<CheckedSqlite>,
     file_name: String,
     path: PathBuf,
 }
@@ -31,39 +30,21 @@ impl Database {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, CoreError> {
         let path = path.as_ref();
 
-        #[cfg(unix)]
-        let conn = crate::backup::open_checked_sqlite(
-            path,
-            OpenFlags::default(),
-            crate::backup::SqliteAccess::OpenOrCreate,
-        )?;
-        #[cfg(windows)]
-        let conn = {
-            if let Some(parent) = path.parent() {
-                if !parent.as_os_str().is_empty() {
-                    fs::create_dir_all(parent)?;
-                }
-            }
-            Connection::open(path)?
-        };
+        let conn = open_checked_sqlite(path, OpenFlags::default(), SqliteAccess::OpenOrCreate)?;
         Self::configure(&conn)?;
         Self::from_configured_connection(path, conn)
     }
 
     pub(crate) fn open_existing(path: &Path) -> Result<Self, CoreError> {
         let flags = OpenFlags::default() & !OpenFlags::SQLITE_OPEN_CREATE;
-        #[cfg(unix)]
-        let conn =
-            crate::backup::open_checked_sqlite(path, flags, crate::backup::SqliteAccess::Existing)?;
-        #[cfg(windows)]
-        let conn = Connection::open_with_flags(path, flags)?;
+        let conn = open_checked_sqlite(path, flags, SqliteAccess::Existing)?;
         Self::configure(&conn)?;
         Self::from_configured_connection(path, conn)
     }
 
     pub(crate) fn from_configured_connection(
         path: &Path,
-        conn: Connection,
+        conn: CheckedSqlite,
     ) -> Result<Self, CoreError> {
         let file_name = path
             .file_name()
@@ -199,20 +180,9 @@ impl Database {
         destination: &Path,
         cancelled: &AtomicBool,
     ) -> Result<(), CoreError> {
-        #[cfg(windows)]
-        if destination.exists() {
-            return Err(CoreError::Conflict("备份目标文件已存在".to_owned()));
-        }
-
         let conn = self.lock()?;
-        #[cfg(windows)]
-        let mut destination_connection = Connection::open(destination)?;
-        #[cfg(unix)]
-        let mut destination_connection = crate::backup::open_checked_sqlite(
-            destination,
-            OpenFlags::default(),
-            crate::backup::SqliteAccess::CreateNew,
-        )?;
+        let mut destination_connection =
+            open_checked_sqlite(destination, OpenFlags::default(), SqliteAccess::CreateNew)?;
         destination_connection.busy_timeout(Duration::from_secs(5))?;
         destination_connection.pragma_update(None, "synchronous", "FULL")?;
 
@@ -260,7 +230,7 @@ impl Database {
         Ok(value)
     }
 
-    pub(crate) fn lock(&self) -> Result<MutexGuard<'_, Connection>, CoreError> {
+    pub(crate) fn lock(&self) -> Result<MutexGuard<'_, CheckedSqlite>, CoreError> {
         self.conn.lock().map_err(|_| CoreError::LockPoisoned)
     }
 }

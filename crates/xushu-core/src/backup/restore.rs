@@ -1244,13 +1244,10 @@ fn current_files(data: &Directories) -> Result<Vec<(String, &'static str)>, Core
     let mut files = Vec::new();
     for suffix in ["", "-wal", "-shm", "-journal"] {
         let name = format!("{PAYLOAD_FILE_NAME}{suffix}");
-        #[cfg(unix)]
         let exists = data
             .sqlite_file_identity(&name)
             .map_err(map_path_error)?
             .is_some();
-        #[cfg(windows)]
-        let exists = data.has_regular_file(&name).map_err(map_path_error)?;
         if exists {
             files.push((name, suffix));
         }
