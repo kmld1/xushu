@@ -137,23 +137,33 @@ pub(crate) fn open_checked_sqlite(
     let parent = Directories::open_sqlite_parent(parent_path, access == SqliteAccess::OpenOrCreate)
         .map_err(map_path_error)?;
     let name = path.file_name().ok_or(CoreError::UnsafePath)?;
-    let check_auxiliary = |directory: &Directories| -> Result<(), CoreError> {
+    let check_auxiliary = |directory: &Directories| -> Result<bool, CoreError> {
+        let mut present = false;
         for suffix in ["-journal", "-wal", "-shm"] {
             let mut side_file = name.to_os_string();
             side_file.push(suffix);
             let entry = directory
                 .sqlite_file_identity(&side_file)
                 .map_err(map_path_error)?;
+            present |= entry.is_some();
             if entry.is_some() && access == SqliteAccess::CreateNew {
                 return Err(CoreError::Conflict(
                     "备份目标已有 SQLite 辅助文件".to_owned(),
                 ));
             }
         }
-        Ok(())
+        Ok(present)
     };
-    check_auxiliary(&parent)?;
+    let auxiliary_present = check_auxiliary(&parent)?;
     let existing = parent.sqlite_file_identity(name).map_err(map_path_error)?;
+    if existing.is_none() && auxiliary_present {
+        // A missing main database with leftover WAL/SHM/journal is not a normal
+        // state. Creating an empty database here could apply or discard those
+        // files without the user's knowledge, so require manual inspection.
+        return Err(CoreError::Conflict(
+            "数据库主文件缺失，但存在 SQLite 辅助文件；已拒绝自动创建新数据库".to_owned(),
+        ));
+    }
     if existing.is_some() && access == SqliteAccess::CreateNew {
         return Err(CoreError::Conflict("备份目标文件已存在".to_owned()));
     }

@@ -410,6 +410,21 @@ fn database_rejects_linked_main_and_companion_files() {
 
 #[cfg(unix)]
 #[test]
+fn database_refuses_to_create_over_orphaned_companions() {
+    use std::fs;
+
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let home = TempDir::new().unwrap();
+        fs::write(home.path().join(format!("xushu.db{suffix}")), b"orphan").unwrap();
+        assert!(matches!(
+            Database::open(home.path().join("xushu.db")),
+            Err(CoreError::Conflict(_))
+        ));
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn database_rejects_hard_linked_main_and_companion_files() {
     use std::fs;
 
