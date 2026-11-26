@@ -14,10 +14,11 @@ use rusqlite::{config::DbConfig, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::claude::path_guard::{Directories, FileAccess};
 use crate::db::{run_migrations, Database, MIGRATIONS};
 use crate::error::CoreError;
 
-use super::paths::{join_relative, read_bounded_file, sha256_file};
+use super::paths::{join_relative, map_path_error, read_bounded, sha256_reader};
 
 pub const BACKUP_FORMAT_VERSION: u32 = 1;
 pub const BACKUP_PRODUCT: &str = "XUSHU";
@@ -192,8 +193,9 @@ pub fn validate_manifest(manifest: &BackupManifest) -> Result<(), CoreError> {
     Ok(())
 }
 
-pub fn read_manifest(directory: &Path) -> Result<ManifestRead, CoreError> {
+pub(super) fn read_manifest_in(directory: &Directories) -> Result<ManifestRead, CoreError> {
     if directory
+        .canonical
         .file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.to_ascii_lowercase().starts_with(".partial-"))
@@ -202,21 +204,24 @@ pub fn read_manifest(directory: &Path) -> Result<ManifestRead, CoreError> {
             "备份尚未发布，不能使用临时目录".to_owned(),
         ));
     }
-    read_staged_manifest(directory)
-}
-
-pub(super) fn read_staged_manifest(directory: &Path) -> Result<ManifestRead, CoreError> {
-    let bytes = read_bounded_file(&directory.join(MANIFEST_FILE_NAME), MAX_MANIFEST_BYTES)
+    let bytes = directory
+        .open_file(MANIFEST_FILE_NAME, FileAccess::Read)
+        .map_err(map_path_error)
+        .and_then(|file| read_bounded(file, MAX_MANIFEST_BYTES))
         .map_err(|error| match error {
             CoreError::Io(_) => CoreError::Backup("备份清单不存在或无法读取".to_owned()),
             other => other,
         })?;
-    let manifest: BackupManifest = serde_json::from_slice(&bytes)
+    parse_manifest(&bytes)
+}
+
+pub(super) fn parse_manifest(bytes: &[u8]) -> Result<ManifestRead, CoreError> {
+    let manifest: BackupManifest = serde_json::from_slice(bytes)
         .map_err(|_| CoreError::Compatibility("备份清单无法解析或包含未知字段".to_owned()))?;
     validate_manifest(&manifest)?;
 
     let mut hasher = Sha256::new();
-    hasher.update(&bytes);
+    hasher.update(bytes);
     let manifest_sha256 = super::paths::to_hex(&hasher.finalize());
     Ok(ManifestRead {
         manifest,
@@ -225,16 +230,21 @@ pub(super) fn read_staged_manifest(directory: &Path) -> Result<ManifestRead, Cor
     })
 }
 
-pub fn verify_payload(
-    directory: &Path,
+pub(super) fn verify_payload_in(
+    directory: &Directories,
     manifest: &BackupManifest,
 ) -> Result<(u64, String), CoreError> {
     let payload = manifest.payload();
-    let path = join_relative(directory, &payload.path)?;
-    let (sha256, size) = sha256_file(&path, MAX_BACKUP_BYTES).map_err(|error| match error {
-        CoreError::Io(_) => CoreError::Backup("备份数据文件不存在或无法读取".to_owned()),
-        other => other,
-    })?;
+    let path = join_relative(&directory.canonical, &payload.path)?;
+    let name = path.file_name().ok_or(CoreError::UnsafePath)?;
+    let (sha256, size) = directory
+        .open_file(name, FileAccess::Read)
+        .map_err(map_path_error)
+        .and_then(|mut file| sha256_reader(&mut file, MAX_BACKUP_BYTES))
+        .map_err(|error| match error {
+            CoreError::Io(_) => CoreError::Backup("备份数据文件不存在或无法读取".to_owned()),
+            other => other,
+        })?;
     if size != payload.size {
         return Err(CoreError::Backup("备份数据文件大小与清单不一致".to_owned()));
     }
@@ -399,6 +409,7 @@ fn normalize_schema_line_endings(sql: String) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::paths::{secure_directory, sha256_file};
     use super::*;
     use std::fs;
     use tempfile::TempDir;
@@ -479,7 +490,8 @@ mod tests {
             [0xff_u8, 0xfe, 0x00, 0x7b],
         )
         .expect("write invalid manifest");
-        let error = read_manifest(directory.path()).expect_err("invalid encoding must fail");
+        let guard = secure_directory(directory.path()).unwrap();
+        let error = read_manifest_in(&guard).expect_err("invalid encoding must fail");
         assert!(matches!(error, CoreError::Compatibility(_)));
     }
 
@@ -506,7 +518,8 @@ mod tests {
         let directory = TempDir::new().expect("temp dir");
         let manifest = valid_manifest();
         fs::write(directory.path().join(PAYLOAD_FILE_NAME), b"0123456789").expect("write payload");
-        let error = verify_payload(directory.path(), &manifest).expect_err("hash mismatch");
+        let guard = secure_directory(directory.path()).unwrap();
+        let error = verify_payload_in(&guard, &manifest).expect_err("hash mismatch");
         assert!(matches!(error, CoreError::Backup(_)));
 
         let mut good = valid_manifest();
@@ -516,6 +529,6 @@ mod tests {
             .expect("hash file")
             .0;
         good.files[0].sha256 = actual;
-        verify_payload(directory.path(), &good).expect("hash match");
+        verify_payload_in(&guard, &good).expect("hash match");
     }
 }

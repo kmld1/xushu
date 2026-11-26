@@ -969,6 +969,37 @@ fn cancelled_backup_leaves_no_valid_backup_directory() {
             .count();
         assert_eq!(entries, 0, "cancelled backup left a directory");
     }
+    let workspace = directory.path().join("backup-workspaces");
+    assert!(!workspace.exists() || fs::read_dir(workspace).unwrap().next().is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn backup_exports_a_verified_snapshot_to_a_shared_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (directory, database) = temp_database();
+    let target = directory.path().join("shared-backups");
+    fs::create_dir(&target).unwrap();
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o1777)).unwrap();
+
+    let service = BackupService::new(&database, directory.path());
+    let backup = service
+        .create_manual(&target.to_string_lossy(), &AtomicBool::new(false))
+        .expect("export an already validated snapshot through the directory handle");
+    let published = Path::new(&backup.directory_path);
+    assert_eq!(
+        published.parent(),
+        Some(fs::canonicalize(target).unwrap().as_path())
+    );
+    let mut files: Vec<_> = fs::read_dir(published)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    files.sort();
+    assert_eq!(files, ["manifest.json", "xushu.db"]);
+    assert!(service.verify(&backup.backup_id).unwrap().verified);
+    assert_eq!(database.health().unwrap().journal_mode, "wal");
 }
 
 #[test]
@@ -1117,7 +1148,21 @@ fn rollback_restores_the_original_database_after_a_failed_switch() {
 
     let outcome = open_preflight(&database, directory.path(), &record);
     let plan = outcome.plan.expect("plan");
-    let journal = switch_to_plan(database, directory.path(), &plan, "rollback-test");
+    let journal = RestoreService::new(&database, directory.path())
+        .create_rollback("rollback-test")
+        .unwrap();
+    drop(database);
+    let sidecar = directory.path().join("xushu.db-journal");
+    let mut journal = journal;
+    fs::write(&sidecar, b"journal fixture").unwrap();
+    RestoreService::begin_switch(directory.path(), &mut journal, &plan).unwrap();
+    RestoreService::switch_files(directory.path(), &journal, &plan).unwrap();
+    assert!(!sidecar.exists());
+    assert_eq!(
+        fs::read(Path::new(&journal.rollback_directory()).join("original-xushu.db-journal"))
+            .unwrap(),
+        b"journal fixture"
+    );
     let database_path = directory.path().join("xushu.db");
     assert_eq!(
         RestoreService::verify_restored_database(&database_path)
@@ -1207,6 +1252,8 @@ fn restore_rejects_a_replaced_workspace_with_an_identical_payload() {
         Err(CoreError::UnsafePath)
     ));
     assert_eq!(file_sha256(database.path()), original_sha);
+    RestoreService::cleanup_plan_workspace(&plan);
+    assert!(plan.isolated_database.exists());
 }
 
 #[test]

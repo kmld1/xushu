@@ -1,6 +1,7 @@
 //! 一致性备份创建、校验、历史与保留策略。
 
 use std::fs;
+use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
@@ -10,7 +11,7 @@ use rusqlite::{params, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::claude::path_guard::Directories;
+use crate::claude::path_guard::{Directories, FileAccess};
 use crate::db::{now_utc_rfc3339, Database};
 use crate::error::CoreError;
 
@@ -18,15 +19,16 @@ use super::integrity::{
     DataIntegrityReport, DataIntegrityService, IntegrityCheck, IntegrityStatus,
 };
 use super::manifest::{
-    build_manifest, isolated_failure_detail, manifest_bytes, open_isolated_payload, read_manifest,
-    read_staged_manifest, verify_payload, BackupOrigin, MANIFEST_FILE_NAME, MAX_BACKUP_BYTES,
-    PAYLOAD_FILE_NAME,
+    build_manifest, isolated_failure_detail, manifest_bytes, open_isolated_payload, parse_manifest,
+    read_manifest_in, verify_payload_in, BackupOrigin, MANIFEST_FILE_NAME, MAX_BACKUP_BYTES,
+    MAX_MANIFEST_BYTES, PAYLOAD_FILE_NAME,
 };
 #[cfg(windows)]
 use super::paths::free_space_bytes;
 use super::paths::{
-    capacity_ok, copy_regular_file_bounded, display_path, map_path_error, prepare_directory,
-    remove_known_files, secure_directory, sha256_file, write_new_file,
+    capacity_ok, copy_bounded, display_path, map_path_error, prepare_directory,
+    private_data_directory, read_bounded, remove_known_files, secure_directory, sha256_reader,
+    write_and_sync,
 };
 
 const REGISTRY_LIMIT: i64 = 200;
@@ -37,6 +39,7 @@ const TRANSIENT_FILES: &[&str] = &[
     PAYLOAD_FILE_NAME,
     "xushu.db-wal",
     "xushu.db-shm",
+    "xushu.db-journal",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -258,7 +261,7 @@ impl<'a> BackupService<'a> {
         }
 
         let manifest_read = match secure_directory(&directory)
-            .and_then(|guard| read_manifest(&guard.canonical).map(|manifest| (guard, manifest)))
+            .and_then(|guard| read_manifest_in(&guard).map(|manifest| (guard, manifest)))
         {
             Ok(value) => value,
             Err(error) => {
@@ -288,7 +291,7 @@ impl<'a> BackupService<'a> {
                 });
             }
         };
-        let (_backup_guard, manifest_read) = manifest_read;
+        let (backup_guard, manifest_read) = manifest_read;
         checks.push(pass_check("manifest", "备份清单格式", "格式与字段通过校验"));
 
         let manifest = &manifest_read.manifest;
@@ -305,7 +308,7 @@ impl<'a> BackupService<'a> {
         });
         verified &= registry_matches;
 
-        if let Err(error) = verify_payload(&directory, manifest) {
+        if let Err(error) = verify_payload_in(&backup_guard, manifest) {
             checks.push(failed_check(
                 "payload_hash",
                 "数据文件校验和",
@@ -338,25 +341,36 @@ impl<'a> BackupService<'a> {
         ));
 
         let workspace_root = self.data_directory.join("verify-workspaces");
-        let root = prepare_directory(&workspace_root)?;
+        let root = private_data_directory(&workspace_root, true)?;
         let name = Uuid::new_v4().to_string();
         root.create_child(&name).map_err(map_path_error)?;
         let workspace_guard = root.open_child(&name).map_err(map_path_error)?;
         let workspace = workspace_guard.canonical.clone();
         let copy_path = workspace.join(PAYLOAD_FILE_NAME);
 
-        let copy_result = copy_regular_file_bounded(
-            &directory.join(PAYLOAD_FILE_NAME),
-            &copy_path,
-            MAX_BACKUP_BYTES,
-        )
-        .and_then(|_| {
-            let (copied_sha, _) = sha256_file(&copy_path, MAX_BACKUP_BYTES)?;
-            if !copied_sha.eq_ignore_ascii_case(&manifest.payload().sha256) {
-                return Err(CoreError::Backup("隔离副本校验和不一致".to_owned()));
-            }
-            Ok(())
-        });
+        let workspace_payload = |access| {
+            workspace_guard
+                .open_file(PAYLOAD_FILE_NAME, access)
+                .map_err(map_path_error)
+        };
+        let copy_result = backup_guard
+            .open_file(PAYLOAD_FILE_NAME, FileAccess::Read)
+            .map_err(map_path_error)
+            .and_then(|source| {
+                copy_bounded(
+                    source,
+                    || workspace_payload(FileAccess::CreateNew),
+                    MAX_BACKUP_BYTES,
+                )
+            })
+            .and_then(|_| {
+                let (copied_sha, _) =
+                    sha256_reader(&mut workspace_payload(FileAccess::Read)?, MAX_BACKUP_BYTES)?;
+                if !copied_sha.eq_ignore_ascii_case(&manifest.payload().sha256) {
+                    return Err(CoreError::Backup("隔离副本校验和不一致".to_owned()));
+                }
+                Ok(())
+            });
 
         if let Err(error) = copy_result {
             checks.push(failed_check(
@@ -480,13 +494,13 @@ impl<'a> BackupService<'a> {
         let parent = secure_directory(directory.parent().ok_or(CoreError::UnsafePath)?)?;
         let name = directory.file_name().ok_or(CoreError::UnsafePath)?;
         let guard = parent.open_child(name).map_err(map_path_error)?;
-        let manifest_read = read_manifest(&directory)?;
+        let manifest_read = read_manifest_in(&guard)?;
         if manifest_read.manifest.backup_id != record.backup_id {
             return Err(CoreError::Conflict(
                 "备份清单与登记不一致，已拒绝删除".to_owned(),
             ));
         }
-        verify_payload(&directory, &manifest_read.manifest)?;
+        verify_payload_in(&guard, &manifest_read.manifest)?;
 
         if !owns_only_known_files(&guard)? {
             return Err(CoreError::Conflict(
@@ -721,6 +735,15 @@ impl<'a> BackupService<'a> {
         cancelled: &AtomicBool,
     ) -> Result<BackupRecord, CoreError> {
         let target_guard = prepare_directory(target)?;
+        #[cfg(unix)]
+        let target_guard = {
+            let protected =
+                Directories::open_backup_target(&target_guard.canonical).map_err(map_path_error)?;
+            if protected.identity != target_guard.identity {
+                return Err(CoreError::UnsafePath);
+            }
+            protected
+        };
         let target = target_guard.canonical.clone();
         let backup_id = Uuid::new_v4().to_string();
         let now = Utc::now();
@@ -760,7 +783,6 @@ impl<'a> BackupService<'a> {
         cleanup_stale_partials(&target_guard);
 
         let partial_name = format!(".partial-{backup_id}");
-        let partial = target.join(&partial_name);
         target_guard
             .create_child(&partial_name)
             .map_err(map_path_error)?;
@@ -769,33 +791,16 @@ impl<'a> BackupService<'a> {
                 .open_child(&partial_name)
                 .map_err(map_path_error)?,
         );
-        let payload_path = partial.join(PAYLOAD_FILE_NAME);
-
         let result = (|| -> Result<BackupRecord, CoreError> {
-            self.database
-                .backup_to_with_cancel(&payload_path, cancelled)?;
-            if cancelled.load(Ordering::Relaxed) {
-                return Err(CoreError::BackupCancelled);
-            }
-
             let schema_version = self.current_schema_version()?;
-            {
-                let snapshot = open_isolated_payload(&payload_path, schema_version)?;
-                snapshot.compact_for_backup()?;
-                let report = DataIntegrityService::new(&snapshot).check()?;
-                if !report.ok {
-                    return Err(CoreError::Backup(
-                        "备份快照的数据完整性检查未通过".to_owned(),
-                    ));
-                }
-            }
             let staged = partial_guard.as_ref().ok_or(CoreError::UnsafePath)?;
-            remove_known_files(staged, &["xushu.db-wal", "xushu.db-shm"])?;
-
-            let (payload_sha256, payload_size) = sha256_file(&payload_path, MAX_BACKUP_BYTES)?;
-            if payload_size == 0 {
-                return Err(CoreError::Backup("备份数据文件为空".to_owned()));
-            }
+            let (payload_sha256, payload_size) = self.export_validated_snapshot(
+                staged,
+                &backup_id,
+                schema_version,
+                required,
+                cancelled,
+            )?;
             if cancelled.load(Ordering::Relaxed) {
                 return Err(CoreError::BackupCancelled);
             }
@@ -810,13 +815,17 @@ impl<'a> BackupService<'a> {
                 &payload_sha256,
             );
             let bytes = manifest_bytes(&manifest)?;
-            write_new_file(&partial.join(MANIFEST_FILE_NAME), &bytes)?;
-
-            let read_back = read_staged_manifest(&partial)?;
-            if read_back.manifest.backup_id != backup_id {
+            let entry = |access| {
+                staged
+                    .open_file(MANIFEST_FILE_NAME, access)
+                    .map_err(map_path_error)
+            };
+            write_and_sync(entry(FileAccess::CreateNew)?, &bytes)?;
+            let read_back =
+                parse_manifest(&read_bounded(entry(FileAccess::Read)?, MAX_MANIFEST_BYTES)?)?;
+            if read_back.manifest != manifest {
                 return Err(CoreError::Backup("备份清单写入后校验失败".to_owned()));
             }
-            verify_payload(&partial, &read_back.manifest)?;
             if cancelled.load(Ordering::Relaxed) {
                 return Err(CoreError::BackupCancelled);
             }
@@ -827,19 +836,26 @@ impl<'a> BackupService<'a> {
             if partial_guard
                 .as_ref()
                 .is_none_or(|guard| guard.identity != staged.identity)
+                || secure_directory(&target)?.identity != target_guard.identity
             {
                 return Err(CoreError::UnsafePath);
             }
             let identity = staged.identity.clone();
             drop(staged);
             partial_guard.take();
-            target_guard
-                .rename_file(&partial_name, &directory_name)
-                .map_err(map_path_error)?;
+            if let Err(error) = target_guard.publish_child(&partial_name, &directory_name) {
+                partial_guard = target_guard
+                    .open_child(&partial_name)
+                    .ok()
+                    .filter(|guard| guard.identity == identity);
+                return Err(map_path_error(error));
+            }
             let final_guard = target_guard
                 .open_child(&directory_name)
                 .map_err(map_path_error)?;
-            if final_guard.identity != identity {
+            if final_guard.identity != identity
+                || secure_directory(&target)?.identity != target_guard.identity
+            {
                 return Err(CoreError::UnsafePath);
             }
 
@@ -884,6 +900,74 @@ impl<'a> BackupService<'a> {
             }
         }
         result
+    }
+
+    fn export_validated_snapshot(
+        &self,
+        export: &Directories,
+        backup_id: &str,
+        schema_version: i64,
+        required_space: u64,
+        cancelled: &AtomicBool,
+    ) -> Result<(String, u64), CoreError> {
+        // SQLite only opens the copy in the app's data directory. The export
+        // receives a self-contained file through the held directory handle.
+        let path = self.data_directory.join("backup-workspaces");
+        let root = private_data_directory(&path, true)?;
+        #[cfg(unix)]
+        let available = root.free_space_bytes();
+        #[cfg(windows)]
+        let available = free_space_bytes(&root.canonical);
+        if !capacity_ok(required_space, available) {
+            return Err(CoreError::Backup(
+                "应用数据目录空间不足，无法创建备份快照".to_owned(),
+            ));
+        }
+        cleanup_stale_partials(&root);
+        let name = format!(".partial-{backup_id}-snapshot");
+        root.create_child(&name).map_err(map_path_error)?;
+        let workspace = root.open_child(&name).map_err(map_path_error)?;
+        let path = workspace.canonical.join(PAYLOAD_FILE_NAME);
+        let result = (|| {
+            self.database.backup_to_with_cancel(&path, cancelled)?;
+            if cancelled.load(Ordering::Relaxed) {
+                return Err(CoreError::BackupCancelled);
+            }
+            {
+                let snapshot = open_isolated_payload(&path, schema_version)?;
+                snapshot.compact_for_backup()?;
+                if !DataIntegrityService::new(&snapshot).check()?.ok {
+                    return Err(CoreError::Backup(
+                        "备份快照的数据完整性检查未通过".to_owned(),
+                    ));
+                }
+            }
+            let mut source = workspace
+                .open_file(PAYLOAD_FILE_NAME, FileAccess::Read)
+                .map_err(map_path_error)?;
+            let expected = sha256_reader(&mut source, MAX_BACKUP_BYTES)?;
+            if expected.1 == 0 {
+                return Err(CoreError::Backup("备份数据文件为空".to_owned()));
+            }
+            if cancelled.load(Ordering::Relaxed) {
+                return Err(CoreError::BackupCancelled);
+            }
+            source.seek(SeekFrom::Start(0))?;
+            let entry = |access| {
+                export
+                    .open_file(PAYLOAD_FILE_NAME, access)
+                    .map_err(map_path_error)
+            };
+            copy_bounded(source, || entry(FileAccess::CreateNew), MAX_BACKUP_BYTES)?;
+            if sha256_reader(&mut entry(FileAccess::Read)?, MAX_BACKUP_BYTES)? != expected {
+                return Err(CoreError::Backup("导出的备份快照校验和不一致".to_owned()));
+            }
+            Ok(expected)
+        })();
+        let cleanup = cleanup_owned_directory(&root, &name, workspace, TRANSIENT_FILES);
+        let snapshot = result?;
+        cleanup?;
+        Ok(snapshot)
     }
 
     fn current_schema_version(&self) -> Result<i64, CoreError> {

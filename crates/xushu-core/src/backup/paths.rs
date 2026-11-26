@@ -39,6 +39,17 @@ pub(crate) fn secure_directory(path: &Path) -> Result<Directories, CoreError> {
     Directories::open(path).map_err(map_path_error)
 }
 
+pub(super) fn private_data_directory(path: &Path, create: bool) -> Result<Directories, CoreError> {
+    #[cfg(unix)]
+    return Directories::open_sqlite_parent(path, create).map_err(map_path_error);
+    #[cfg(windows)]
+    if create {
+        prepare_directory(path)
+    } else {
+        secure_directory(path)
+    }
+}
+
 /// 校验或创建用户选择的备份目标目录。
 ///
 /// 只创建最后一级目录；父目录必须已经存在且通过安全校验。这样不会因为一次
@@ -232,18 +243,6 @@ pub(super) fn sha256_reader(file: &mut File, max_bytes: u64) -> Result<(String, 
     Ok((to_hex(&hasher.finalize()), total))
 }
 
-pub(crate) fn copy_regular_file_bounded(
-    source: &Path,
-    destination: &Path,
-    max_bytes: u64,
-) -> Result<u64, CoreError> {
-    copy_bounded(
-        open_file(source, FileAccess::Read)?,
-        || open_file(destination, FileAccess::CreateNew),
-        max_bytes,
-    )
-}
-
 pub(super) fn copy_bounded(
     mut source_file: File,
     destination: impl FnOnce() -> Result<File, CoreError>,
@@ -285,11 +284,7 @@ pub(super) fn copy_bounded(
     Ok(total)
 }
 
-pub(crate) fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), CoreError> {
-    write_and_sync(open_file(path, FileAccess::CreateNew)?, bytes)
-}
-
-fn write_and_sync(mut file: File, bytes: &[u8]) -> Result<(), CoreError> {
+pub(super) fn write_and_sync(mut file: File, bytes: &[u8]) -> Result<(), CoreError> {
     file.write_all(bytes).map_err(CoreError::Io)?;
     file.sync_all().map_err(CoreError::Io)?;
     Ok(())

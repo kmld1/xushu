@@ -18,6 +18,9 @@ xushu-hook-protocol = { path = "../xushu-hook-protocol" }
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "=1.1.6", features = ["fs", "process"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "=0.2.191"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = [
     "Win32_Foundation",

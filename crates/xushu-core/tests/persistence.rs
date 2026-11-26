@@ -386,3 +386,81 @@ fn database_requires_a_protected_directory_and_private_new_file() {
     drop(database);
     assert!(Database::open(&path).unwrap().health().unwrap().ok);
 }
+
+#[cfg(unix)]
+#[test]
+fn database_rejects_linked_main_and_companion_files() {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    let outside = TempDir::new().unwrap();
+    let protected = outside.path().join("protected");
+    fs::write(&protected, b"untouched").unwrap();
+    for suffix in ["", "-wal", "-shm", "-journal"] {
+        let home = TempDir::new().unwrap();
+        let path = home.path().join("xushu.db");
+        if !suffix.is_empty() {
+            drop(Database::open(&path).unwrap());
+        }
+        symlink(&protected, home.path().join(format!("xushu.db{suffix}"))).unwrap();
+        assert!(matches!(Database::open(&path), Err(CoreError::UnsafePath)));
+        assert_eq!(fs::read(&protected).unwrap(), b"untouched");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn database_rejects_hard_linked_main_and_companion_files() {
+    use std::fs;
+
+    let outside = TempDir::new().unwrap();
+    let protected = outside.path().join("protected");
+    fs::write(&protected, b"untouched").unwrap();
+    for suffix in ["", "-wal", "-shm", "-journal"] {
+        let home = TempDir::new().unwrap();
+        let path = home.path().join("xushu.db");
+        if !suffix.is_empty() {
+            drop(Database::open(&path).unwrap());
+        }
+        let target = home.path().join(format!("xushu.db{suffix}"));
+        let _ = fs::remove_file(&target);
+        fs::hard_link(&protected, &target).unwrap();
+        assert!(matches!(Database::open(&path), Err(CoreError::UnsafePath)));
+        assert_eq!(fs::read(&protected).unwrap(), b"untouched");
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn database_rejects_write_acl_even_with_private_unix_modes() {
+    use std::fs;
+    use std::process::Command;
+
+    let fixture = TempDir::new().unwrap();
+    let parent = fixture.path().join("data");
+    let path = parent.join("xushu.db");
+    drop(Database::open(&path).unwrap());
+    let assert_acl_change = |args: &[&str], target: &std::path::Path| {
+        let result = Command::new("/bin/chmod")
+            .args(args)
+            .arg(target)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    };
+    assert_acl_change(&["+a", "everyone allow add_file"], &parent);
+    assert!(matches!(Database::open(&path), Err(CoreError::UnsafePath)));
+    assert_acl_change(&["-N"], &parent);
+
+    assert_acl_change(&["+a", "everyone allow write"], &path);
+    assert!(matches!(Database::open(&path), Err(CoreError::UnsafePath)));
+    assert_acl_change(&["-N"], &path);
+
+    assert_acl_change(&["+a", "everyone deny delete"], &parent);
+    assert!(Database::open(&path).unwrap().health().unwrap().ok);
+    assert_eq!(fs::read_dir(&parent).unwrap().count(), 1);
+}

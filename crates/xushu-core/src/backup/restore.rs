@@ -22,14 +22,13 @@ use super::integrity::{
     DataIntegrityReport, DataIntegrityService, IntegrityCheck, IntegrityStatus,
 };
 use super::manifest::{
-    isolated_failure_detail, open_isolated_payload, read_manifest, verify_payload, BackupManifest,
-    BackupOrigin, MANIFEST_FILE_NAME, MAX_BACKUP_BYTES, PAYLOAD_FILE_NAME,
+    isolated_failure_detail, open_isolated_payload, read_manifest_in, verify_payload_in,
+    BackupManifest, BackupOrigin, MANIFEST_FILE_NAME, MAX_BACKUP_BYTES, PAYLOAD_FILE_NAME,
 };
 use super::paths::{
-    atomic_replace_file, atomic_replace_in, capacity_ok, copy_bounded, copy_regular_file_bounded,
-    display_path, free_space_bytes, map_path_error, prepare_directory, read_bounded,
-    read_bounded_file, remove_known_files, secure_directory, sha256_file, sha256_reader,
-    validate_absolute,
+    atomic_replace_file, atomic_replace_in, capacity_ok, copy_bounded, display_path,
+    free_space_bytes, map_path_error, private_data_directory, read_bounded, read_bounded_file,
+    remove_known_files, secure_directory, sha256_file, sha256_reader, validate_absolute,
 };
 use super::service::database_file_sizes;
 
@@ -242,9 +241,9 @@ impl<'a> RestoreService<'a> {
         let backup_guard = secure_directory(&requested)?;
         let backup_directory = backup_guard.canonical.clone();
 
-        let manifest_read = read_manifest(&backup_directory)?;
+        let manifest_read = read_manifest_in(&backup_guard)?;
         let manifest = manifest_read.manifest.clone();
-        let (payload_size, payload_sha256) = verify_payload(&backup_directory, &manifest)?;
+        let (payload_size, payload_sha256) = verify_payload_in(&backup_guard, &manifest)?;
 
         let current_change_stamp = self.database.change_stamp()?;
         let current_summary = self.current_summary()?;
@@ -343,7 +342,7 @@ impl<'a> RestoreService<'a> {
 
         let token = Uuid::new_v4().to_string();
         let workspace_root = self.data_directory.join("restore-workspaces");
-        let workspace_root_guard = prepare_directory(&workspace_root)?;
+        let workspace_root_guard = private_data_directory(&workspace_root, true)?;
         let workspace_directory = workspace_root_guard.canonical.join(&token);
         workspace_root_guard
             .create_child(&token)
@@ -356,12 +355,20 @@ impl<'a> RestoreService<'a> {
 
         let isolated_result =
             (|| -> Result<(RestoreDataSummary, String, DataIntegrityReport), CoreError> {
-                copy_regular_file_bounded(
-                    &backup_directory.join(PAYLOAD_FILE_NAME),
-                    &isolated_database,
+                let workspace_payload = |access| {
+                    workspace_guard
+                        .open_file(PAYLOAD_FILE_NAME, access)
+                        .map_err(map_path_error)
+                };
+                copy_bounded(
+                    backup_guard
+                        .open_file(PAYLOAD_FILE_NAME, FileAccess::Read)
+                        .map_err(map_path_error)?,
+                    || workspace_payload(FileAccess::CreateNew),
                     MAX_BACKUP_BYTES,
                 )?;
-                let (copied_sha, _) = sha256_file(&isolated_database, MAX_BACKUP_BYTES)?;
+                let (copied_sha, _) =
+                    sha256_reader(&mut workspace_payload(FileAccess::Read)?, MAX_BACKUP_BYTES)?;
                 if !copied_sha.eq_ignore_ascii_case(&payload_sha256) {
                     return Err(CoreError::Backup(
                         "隔离副本与备份数据文件校验和不一致".to_owned(),
@@ -384,7 +391,8 @@ impl<'a> RestoreService<'a> {
                 }
                 compaction?;
                 remove_known_files(&workspace_guard, &["xushu.db-wal", "xushu.db-shm"])?;
-                let (isolated_sha, _) = sha256_file(&isolated_database, MAX_BACKUP_BYTES)?;
+                let (isolated_sha, _) =
+                    sha256_reader(&mut workspace_payload(FileAccess::Read)?, MAX_BACKUP_BYTES)?;
                 Ok((summary?, isolated_sha, report))
             })();
 
@@ -392,7 +400,7 @@ impl<'a> RestoreService<'a> {
             Ok(value) => value,
             Err(error) => {
                 drop(workspace_guard);
-                cleanup_owned_workspace(&workspace_directory);
+                cleanup_owned_workspace(&workspace_directory, &workspace_identity);
                 checks.push(failed_check(
                     "isolated_restore",
                     "隔离恢复验证",
@@ -634,11 +642,11 @@ impl<'a> RestoreService<'a> {
             ));
         }
         let backup_guard = secure_directory(&plan.backup_directory)?;
-        let workspace_guard = secure_directory(&plan.workspace_directory)?;
+        let workspace_guard = private_data_directory(&plan.workspace_directory, false)?;
         if workspace_guard.identity != plan.workspace_identity {
             return Err(CoreError::UnsafePath);
         }
-        let manifest_read = read_manifest(&backup_guard.canonical)?;
+        let manifest_read = read_manifest_in(&backup_guard)?;
         if manifest_read.manifest_sha256 != plan.manifest_sha256 {
             return Err(CoreError::Restore(
                 "备份清单在预检后发生变化，请重新预检".to_owned(),
@@ -651,8 +659,11 @@ impl<'a> RestoreService<'a> {
                 "备份身份或数据库版本在预检后发生变化，请重新预检".to_owned(),
             ));
         }
-        verify_payload(&plan.backup_directory, &manifest_read.manifest)?;
-        let (isolated_sha, _) = sha256_file(&plan.isolated_database, MAX_BACKUP_BYTES)?;
+        verify_payload_in(&backup_guard, &manifest_read.manifest)?;
+        let mut payload = workspace_guard
+            .open_file(PAYLOAD_FILE_NAME, FileAccess::Read)
+            .map_err(map_path_error)?;
+        let (isolated_sha, _) = sha256_reader(&mut payload, MAX_BACKUP_BYTES)?;
         if isolated_sha != plan.isolated_sha256 {
             return Err(CoreError::Restore(
                 "隔离恢复副本在预检后发生变化，请重新预检".to_owned(),
@@ -681,7 +692,7 @@ impl<'a> RestoreService<'a> {
         }
 
         let rollback_root = self.data_directory.join("restore-rollback");
-        let rollback_root_guard = prepare_directory(&rollback_root)?;
+        let rollback_root_guard = private_data_directory(&rollback_root, true)?;
         let rollback_directory = rollback_root_guard.canonical.join(operation_id);
         rollback_root_guard
             .create_child(operation_id)
@@ -730,9 +741,10 @@ impl<'a> RestoreService<'a> {
             Ok(journal)
         })();
 
+        let rollback_identity = rollback_guard.identity.clone();
         drop(rollback_guard);
         if result.is_err() {
-            cleanup_owned_workspace(&rollback_directory);
+            cleanup_owned_workspace(&rollback_directory, &rollback_identity);
         }
         result
     }
@@ -762,13 +774,15 @@ impl<'a> RestoreService<'a> {
         {
             return Err(CoreError::UnsafePath);
         }
-        let data = secure_directory(data_directory)?;
+        let data = private_data_directory(data_directory, false)?;
         let rollback = validate_rollback_directory(&data, &rollback_directory)?;
         let workspace = data
             .open_child("restore-workspaces")
             .and_then(|root| root.open_child(&plan.token))
             .map_err(map_path_error)?;
-        if workspace.identity != plan.workspace_identity {
+        if workspace.identity != plan.workspace_identity
+            || private_data_directory(&workspace.canonical, false)?.identity != workspace.identity
+        {
             return Err(CoreError::UnsafePath);
         }
         let mut source = workspace
@@ -833,7 +847,7 @@ impl<'a> RestoreService<'a> {
             if current_database != data_directory.join(PAYLOAD_FILE_NAME) {
                 return Err(CoreError::UnsafePath);
             }
-            let data = secure_directory(data_directory)?;
+            let data = private_data_directory(data_directory, false)?;
             let rollback_guard = validate_rollback_directory(&data, &rollback_directory)?;
             let rollback_database = rollback_directory.join(ROLLBACK_FILE_NAME);
             if Path::new(&journal.rollback_database) != rollback_database {
@@ -897,7 +911,7 @@ impl<'a> RestoreService<'a> {
         let mut updated = journal.clone();
         updated.stage = outcome.to_owned();
         updated.updated_at = now_utc_rfc3339();
-        let guard = secure_directory(data_directory)?;
+        let guard = private_data_directory(data_directory, false)?;
         let destination = format!(
             "restore-journal-{outcome}-{}.json",
             short_id(&journal.restore_id)
@@ -919,7 +933,7 @@ impl<'a> RestoreService<'a> {
     }
 
     pub fn cleanup_plan_workspace(plan: &RestorePlan) {
-        cleanup_owned_workspace(&plan.workspace_directory);
+        cleanup_owned_workspace(&plan.workspace_directory, &plan.workspace_identity);
     }
 
     fn current_schema_version(&self) -> Result<i64, CoreError> {
@@ -1001,7 +1015,7 @@ impl RestoreService<'_> {
 }
 
 pub fn cleanup_workspaces(data_directory: &Path) -> Result<(), CoreError> {
-    let data = secure_directory(data_directory)?;
+    let data = private_data_directory(data_directory, false)?;
     for root_name in ["restore-workspaces", "verify-workspaces"] {
         cleanup_workspace_root(&data, root_name)?;
     }
@@ -1040,7 +1054,7 @@ fn cleanup_workspace_root(data: &Directories, root_name: &str) -> Result<(), Cor
         for child in directory.names()? {
             if !matches!(
                 child?.to_str(),
-                Some(PAYLOAD_FILE_NAME | "xushu.db-wal" | "xushu.db-shm")
+                Some(PAYLOAD_FILE_NAME | "xushu.db-wal" | "xushu.db-shm" | "xushu.db-journal")
             ) {
                 only_known = false;
                 break;
@@ -1057,7 +1071,7 @@ pub fn recover_interrupted_restore(
     data_directory: &Path,
 ) -> Result<Option<RestoreStartupNotice>, CoreError> {
     let journal_path = data_directory.join(JOURNAL_FILE_NAME);
-    let data_guard = secure_directory(data_directory)?;
+    let data_guard = private_data_directory(data_directory, false)?;
     let journal_label = display_path(&journal_path);
     let file = match data_guard.open_file(JOURNAL_FILE_NAME, FileAccess::Read) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -1210,22 +1224,34 @@ fn validate_rollback_directory(
         .open_child("restore-rollback")
         .map_err(map_path_error)?;
     let requested_parent = rollback_directory.parent().ok_or(CoreError::UnsafePath)?;
-    if secure_directory(requested_parent)?.identity != root.identity {
+    if private_data_directory(requested_parent, false)?.identity != root.identity {
         return Err(CoreError::UnsafePath);
     }
-    root.open_child(
-        rollback_directory
-            .file_name()
-            .ok_or(CoreError::UnsafePath)?,
-    )
-    .map_err(map_path_error)
+    let held = root
+        .open_child(
+            rollback_directory
+                .file_name()
+                .ok_or(CoreError::UnsafePath)?,
+        )
+        .map_err(map_path_error)?;
+    if private_data_directory(&held.canonical, false)?.identity != held.identity {
+        return Err(CoreError::UnsafePath);
+    }
+    Ok(held)
 }
 
 fn current_files(data: &Directories) -> Result<Vec<(String, &'static str)>, CoreError> {
     let mut files = Vec::new();
-    for suffix in ["", "-wal", "-shm"] {
+    for suffix in ["", "-wal", "-shm", "-journal"] {
         let name = format!("{PAYLOAD_FILE_NAME}{suffix}");
-        if data.has_regular_file(&name).map_err(map_path_error)? {
+        #[cfg(unix)]
+        let exists = data
+            .sqlite_file_identity(&name)
+            .map_err(map_path_error)?
+            .is_some();
+        #[cfg(windows)]
+        let exists = data.has_regular_file(&name).map_err(map_path_error)?;
+        if exists {
             files.push((name, suffix));
         }
     }
@@ -1405,14 +1431,17 @@ fn interrupted_name() -> String {
     format!("interrupted-{stamp}-xushu.db")
 }
 
-fn cleanup_owned_workspace(directory: &Path) {
+fn cleanup_owned_workspace(directory: &Path, expected_identity: &str) {
     let Some((parent, name)) = directory.parent().zip(directory.file_name()) else {
         return;
     };
-    let Ok(parent) = secure_directory(parent) else {
+    let Ok(parent) = private_data_directory(parent, false) else {
         return;
     };
-    if let Ok(directory) = parent.open_child(name) {
+    let Ok(directory) = parent.open_child(name) else {
+        return;
+    };
+    if directory.identity == expected_identity {
         cleanup_workspace(&parent, name, directory);
     }
 }
@@ -1422,6 +1451,7 @@ fn cleanup_workspace(parent: &Directories, name: &std::ffi::OsStr, directory: Di
         PAYLOAD_FILE_NAME,
         "xushu.db-wal",
         "xushu.db-shm",
+        "xushu.db-journal",
         MANIFEST_FILE_NAME,
     ] {
         let _ = directory.remove_file(file);

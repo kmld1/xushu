@@ -20,16 +20,28 @@ Phase 6 要求把 XUSHU 从“功能可靠”提升到“数据生命周期可�
 
 ### 2.1 使用 SQLite Online Backup API，而不是复制文件
 
-备份通过 `rusqlite` 的 Online Backup API 从活动连接生成一致性快照。备份写入目标目录内的临时 `.partial-<uuid>/xushu.db`，完成后：
+备份通过 `rusqlite` 的 Online Backup API 从活动连接生成一致性快照。SQLite 只在应用数据目录内的私有工作区创建和校验快照：
 
 1. 在隔离连接上整理为单文件（WAL 合并、`journal_mode=DELETE`）；
 2. 执行 `PRAGMA integrity_check`、外键检查与业务关系检查；
-3. 写入 `manifest.json`；
-4. 重新读取清单并校验 SHA-256；
-5. 在同卷目标目录内原子改名到 `xushu-backup-<UTC>-<short-id>/`；
+3. 将单文件快照通过目录句柄复制到用户所选目标内的 `.partial-<uuid>/`，写入 `manifest.json`；
+4. 通过该句柄回读清单，校验快照大小与 SHA-256；
+5. 在目标目录内原子改名到 `xushu-backup-<UTC>-<short-id>/`；
 6. 登记到 `backup_records`；登记失败则删除刚创建的自有备份目录。
 
 不采用“复制 `.db`”或“只 checkpoint 后复制”，因为它们无法覆盖并发写、WAL 内容与写入中断。
+
+### 2.1.1 用户选择的目录不直接交给 SQLite
+
+SQLite 的 Unix VFS 在连接存续期按路径打开主库、WAL、SHM、journal 与临时文件。为防止不可信或可被替换的目标目录影响这些路径操作：
+
+- SQLite 只在应用数据目录内的私有工作区创建、迁移和校验备份快照；用户选择的备份目标不传给 SQLite。
+- 导出与恢复复制只使用已打开目录句柄：`openat` + `O_NOFOLLOW` + `O_EXCL` 创建目标文件，回读 SHA-256 后以 `NOREPLACE` 原子发布，并复核目录与文件身份。
+- 恢复工作区、回退目录与清理操作同样绑定已校验的目录句柄与身份；不再按拼出的路径直接读写。
+- macOS 额外拒绝可写 ACL、远程卷与关闭所有权的卷；所有祖先目录必须由当前用户或 root 拥有，且 group/other 无可写位（sticky 目录按系统语义处理）。
+- 主库仍使用 WAL。既有 `-wal`、`-shm`、`-journal` 必须是当前用户拥有的单链接常规文件，符号链接在打开前被拒绝；SQLite 3.54.1 自身也对伴随文件使用 `O_NOFOLLOW`。
+
+残余边界：具备同一 UID 且能修改应用数据目录的进程，或 root/管理员进程，仍可在连接存续期替换目录项；文件系统权限无法在同一用户域内形成隔离。该边界需要在威胁模型中明确，不能声称已被进程内路径检查完全消除。
 
 ### 2.2 备份范围是数据库快照，而不是整个 AppData
 

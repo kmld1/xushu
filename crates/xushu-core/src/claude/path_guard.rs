@@ -8,6 +8,9 @@ use std::path::{Component, Path, PathBuf};
 #[cfg(unix)]
 use rustix::fs::{self as unix, AtFlags, Mode, OFlags};
 
+#[cfg(target_os = "macos")]
+mod macos;
+
 pub(crate) struct Directories {
     #[cfg(windows)]
     _handles: Vec<File>,
@@ -76,6 +79,11 @@ impl Directories {
     }
 
     #[cfg(unix)]
+    pub fn open_backup_target(path: &Path) -> io::Result<Self> {
+        Self::open_unix(path, true, false)
+    }
+
+    #[cfg(unix)]
     fn open_unix(path: &Path, sqlite: bool, create: bool) -> io::Result<Self> {
         if !path.is_absolute() || path.components().any(|part| part == Component::ParentDir) {
             return Err(unsafe_path());
@@ -132,6 +140,8 @@ impl Directories {
         {
             return Err(unsafe_path());
         }
+        #[cfg(target_os = "macos")]
+        macos::check_sqlite_directory(&self.handle)?;
         Ok(())
     }
 
@@ -147,6 +157,8 @@ impl Directories {
                     && stat.st_nlink == 1
                     && stat.st_mode & 0o022 == 0 =>
             {
+                #[cfg(target_os = "macos")]
+                macos::check_sqlite_file(&self.canonical.join(name), &stat)?;
                 Ok(Some(format!("{:x}:{:x}", stat.st_dev, stat.st_ino)))
             }
             Ok(_) => Err(unsafe_path()),
@@ -264,6 +276,46 @@ impl Directories {
 
     pub fn rename_file(&self, from: impl AsRef<OsStr>, to: impl AsRef<OsStr>) -> io::Result<()> {
         self.move_file(from, self, to)
+    }
+
+    pub fn publish_child(&self, from: &str, to: &str) -> io::Result<()> {
+        let from = checked_name(from.as_ref())?;
+        let to = checked_name(to.as_ref())?;
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        return unix::renameat_with(
+            &self.handle,
+            from,
+            &self.handle,
+            to,
+            unix::RenameFlags::NOREPLACE,
+        )
+        .map_err(unix_path_error);
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            use windows_sys::Win32::Storage::FileSystem::MoveFileW;
+            let from: Vec<u16> = self
+                .canonical
+                .join(from)
+                .as_os_str()
+                .encode_wide()
+                .chain([0])
+                .collect();
+            let to: Vec<u16> = self
+                .canonical
+                .join(to)
+                .as_os_str()
+                .encode_wide()
+                .chain([0])
+                .collect();
+            // SAFETY: both pointers address live, NUL-terminated Windows paths.
+            if unsafe { MoveFileW(from.as_ptr(), to.as_ptr()) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        }
+        #[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
+        self.rename_file(from, to)
     }
 
     pub fn move_file(
@@ -519,6 +571,20 @@ mod tests {
             .is_err());
         guard.remove_file("final").unwrap();
         assert!(!moved.join("final").exists());
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn publishing_a_directory_preserves_an_existing_destination() {
+        let fixture = tempfile::TempDir::new().unwrap();
+        let root = Directories::open(fixture.path()).unwrap();
+        root.create_child("staged").unwrap();
+        root.create_child("published").unwrap();
+        let expected = root.open_child("published").unwrap().identity;
+        let error = root.publish_child("staged", "published").unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(root.open_child("published").unwrap().identity, expected);
+        assert!(root.open_child("staged").is_ok());
     }
 
     #[cfg(target_os = "macos")]

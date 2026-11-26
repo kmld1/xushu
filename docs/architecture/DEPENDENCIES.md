@@ -102,6 +102,7 @@
 | `serde_json` | 1.0.154 | 验证参数数组与证据元数据 |
 | `sha2` | 0.10.9 | 工作区内容指纹与证据摘要哈希 |
 | `windows-sys` | 0.61.2 | Windows Job Object 进程树清理 + Phase 3.6 窗口 Snap 覆盖层（仅 Windows target） |
+| `libc` | 0.2.191 | macOS 文件 ACL、卷标志与 `fstatx_np`/`lstatx_np` 绑定（仅 macOS target；版本原已在锁文件中） |
 | `tempfile` | 3.27.0 | 仅 dev/test 临时数据库与 Hook 测试 |
 
 内部 crate：
