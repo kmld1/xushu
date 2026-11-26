@@ -145,7 +145,7 @@ export function BackupPolicyDialog({
               id="policy-target"
               value={target}
               onChange={(event) => setTarget(event.target.value)}
-              placeholder="例如 D:\XUSHU-Backups"
+              placeholder="自动备份目标目录绝对路径"
               disabled={!automaticEnabled}
             />
             <p className="text-[11px] leading-5 text-muted-foreground">

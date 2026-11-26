@@ -65,7 +65,7 @@ export function ImportProjectDialog({
             <Label htmlFor="project-root-path">项目路径</Label>
             <Input
               id="project-root-path"
-              placeholder="D:\\Projects\\my-project"
+              placeholder="项目根目录绝对路径"
               autoComplete="off"
               spellCheck={false}
               aria-invalid={Boolean(form.formState.errors.rootPath)}

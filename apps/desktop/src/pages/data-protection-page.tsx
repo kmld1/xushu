@@ -602,8 +602,7 @@ export function DataProtectionPage() {
           </div>
           <p className="flex items-start gap-1.5 text-[11px] leading-5 text-muted-foreground">
             <HardDrive className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-            数据目录位于 Windows
-            应用数据目录；备份目标由用户选择，可选择其他磁盘。请确认目标磁盘有足够空间。
+            数据目录位于当前系统的本机应用数据目录；备份目标由用户选择，可选择其他磁盘。请确认目标磁盘有足够空间。
           </p>
         </div>
       </Section>

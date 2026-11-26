@@ -121,7 +121,7 @@ export function CreateBackupDialog({
                 id="backup-target"
                 value={target}
                 onChange={(event) => setTarget(event.target.value)}
-                placeholder="例如 D:\XUSHU-Backups"
+                placeholder="备份目标目录绝对路径"
                 disabled={pending}
                 aria-invalid={Boolean(error)}
                 aria-describedby="backup-target-hint"

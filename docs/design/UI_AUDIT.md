@@ -503,3 +503,12 @@ macOS 将系统交通灯、品牌、项目、页面和主题放入同一条 44px
   - 当前环境 DPI 144、显示器 1 台。
 - 未自动截图/录屏。Windows Snap 实际悬停菜单、标题栏拖拽手感、多显示器、其他 DPI 与 150% 缩放的视觉检查仍为 **VISUAL_REVIEW_PENDING**；不得以自动化测量代替人工视觉签收。
 - 证据：`target/phase7a/installed-full-result.json`、`installed-window-result.json`、`installed-e2e-report.json`（已忽略目录）。
+
+## v1.0.0 跨平台文案修正（2026-11-26）
+
+- 已调用 `frontend-design` Skill（当前主会话），并阅读 `docs/design/DESIGN_SYSTEM.md`；未使用子 Agent，未自动截图/录屏。
+- 数据保护页“数据目录位于 Windows 应用数据目录”改为“当前系统的本机应用数据目录”，修正 macOS 安装下的错误平台说明；不改变布局、Tokens 或组件。
+- 项目导入、创建备份、自动备份策略三个路径输入框的示例由 Windows 专用路径改为中性说明，避免 macOS 用户看到不可用示例；标签与安全提示不变。
+- 状态表达、完成门禁、窗口控制和后端权限均未改变。
+- 自动化：`pnpm test`、`pnpm typecheck`、`pnpm lint`、`pnpm build` 均退出 0；数据保护页测试继续通过。
+- 人工视觉：**VISUAL_REVIEW_PENDING**。本次仅文案与 placeholder，不新增视觉层级；仍建议用户在 macOS 与 Windows 实际窗口复核。
